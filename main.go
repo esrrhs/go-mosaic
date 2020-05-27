@@ -197,8 +197,7 @@ func load_lib(lib string, workernum int, database string) {
 
 	for i, _ := range imagefilelist {
 		if worker > int32(workernum) {
-			atomic.AddInt32(&worker, 1)
-			calc_avg_color(&imagefilelist[i], &worker, &done)
+			time.Sleep(time.Millisecond * 10)
 		} else {
 			atomic.AddInt32(&worker, 1)
 			go calc_avg_color(&imagefilelist[i], &worker, &done)
@@ -206,8 +205,8 @@ func load_lib(lib string, workernum int, database string) {
 		if time.Now().Sub(last) >= time.Second {
 			last = time.Now()
 			speed := int(done) / (int(time.Now().Sub(begin)) / int(time.Second))
-			loggo.Info("load_lib calc image avg color speed %d/s %d%% %s", speed, int(done)*100/len(imagefilelist),
-				time.Duration(int64((len(imagefilelist)-int(done))/speed) * int64(time.Second)).String())
+			loggo.Info("load_lib calc image avg color speed %d/s %d%% %s %d %d %d", speed, int(done)*100/len(imagefilelist),
+				time.Duration(int64((len(imagefilelist)-int(done))/speed) * int64(time.Second)).String(), int(worker), int(done), len(imagefilelist))
 		}
 	}
 
