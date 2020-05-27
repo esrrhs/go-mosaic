@@ -282,10 +282,16 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32) {
 
 	bounds := img.Bounds()
 
+	len := common.MinOfInt(bounds.Dx(), bounds.Dy())
+	startx := bounds.Min.X + (bounds.Dx()-len)/2
+	starty := bounds.Min.Y + (bounds.Dy()-len)/2
+	endx := common.MinOfInt(startx+len, bounds.Max.X)
+	endy := common.MinOfInt(starty+len, bounds.Max.Y)
+
 	var sumR, sumG, sumB, count float64
 
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+	for y := starty; y < endy; y++ {
+		for x := startx; x < endx; x++ {
 			r, g, b, _ := img.At(x, y).RGBA()
 
 			sumR += float64(r)
@@ -317,7 +323,7 @@ func save_to_database(worker *int32, imagefilelist []CalFileInfo, db *bolt.DB) {
 		cfi := imagefilelist[i]
 		if cfi.done {
 			i++
-			
+
 			if cfi.ok {
 				var b bytes.Buffer
 
