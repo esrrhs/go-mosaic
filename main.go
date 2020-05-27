@@ -193,20 +193,27 @@ func load_lib(lib string, workernum int, database string) {
 	var done int32
 
 	atomic.AddInt32(&worker, 1)
-	go save_to_database(&worker, imagefilelist, db)
+	var save_inter int
+	go save_to_database(&worker, &imagefilelist, db, &save_inter)
 
-	for i, _ := range imagefilelist {
+	i := 0
+	for i < len(imagefilelist) {
 		if worker > int32(workernum) {
 			time.Sleep(time.Millisecond * 10)
 		} else {
 			atomic.AddInt32(&worker, 1)
 			go calc_avg_color(&imagefilelist[i], &worker, &done)
+			i++
 		}
 		if time.Now().Sub(last) >= time.Second {
 			last = time.Now()
 			speed := int(done) / (int(time.Now().Sub(begin)) / int(time.Second))
-			loggo.Info("load_lib calc image avg color speed %d/s %d%% %s %d %d %d", speed, int(done)*100/len(imagefilelist),
-				time.Duration(int64((len(imagefilelist)-int(done))/speed) * int64(time.Second)).String(), int(worker), int(done), len(imagefilelist))
+			left := ""
+			if speed > 0 {
+				left = time.Duration(int64((len(imagefilelist)-int(done))/speed) * int64(time.Second)).String()
+			}
+			loggo.Info("load_lib calc image avg color speed %d/s %d%% %s %d %d %d %d", speed, int(done)*100/len(imagefilelist),
+				left, int(worker), int(done), len(imagefilelist), save_inter)
 		}
 	}
 
@@ -309,17 +316,17 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32) {
 	return
 }
 
-func save_to_database(worker *int32, imagefilelist []CalFileInfo, db *bolt.DB) {
+func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, save_inter *int) {
 	defer common.CrashLog()
 	defer atomic.AddInt32(worker, -1)
 
 	i := 0
 	for {
-		if i >= len(imagefilelist) {
+		if i >= len(*imagefilelist) {
 			return
 		}
 
-		cfi := imagefilelist[i]
+		cfi := (*imagefilelist)[i]
 		if cfi.done {
 			i++
 
@@ -342,6 +349,8 @@ func save_to_database(worker *int32, imagefilelist []CalFileInfo, db *bolt.DB) {
 					return err
 				})
 			}
+
+			*save_inter = i
 		} else {
 			time.Sleep(time.Second)
 		}
