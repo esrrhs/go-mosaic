@@ -7,6 +7,7 @@ import (
 	"github.com/boltdb/bolt"
 	"github.com/esrrhs/go-engine/src/common"
 	"github.com/esrrhs/go-engine/src/loggo"
+	"github.com/esrrhs/go-engine/src/threadpool"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -197,13 +198,16 @@ func load_lib(lib string, workernum int, database string) {
 	var save_inter int
 	go save_to_database(&worker, &imagefilelist, db, &save_inter)
 
+	tp := threadpool.NewThreadPool(workernum, 16, func(in interface{}) {
+		i := in.(int)
+		calc_avg_color(&imagefilelist[i], &worker, &done, &donesize)
+	})
+
 	i := 0
 	for i < len(imagefilelist) {
-		if worker > int32(workernum) {
-			time.Sleep(time.Millisecond * 10)
-		} else {
+		ret := tp.AddJobTimeout(int(common.RandInt()), i, 10)
+		if ret {
 			atomic.AddInt32(&worker, 1)
-			go calc_avg_color(&imagefilelist[i], &worker, &done, &donesize)
 			i++
 		}
 		if time.Now().Sub(last) >= time.Second {
