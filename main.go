@@ -191,6 +191,7 @@ func load_lib(lib string, workernum int, database string) {
 	begin := time.Now()
 	last := time.Now()
 	var done int32
+	var donesize int64
 
 	atomic.AddInt32(&worker, 1)
 	var save_inter int
@@ -202,7 +203,7 @@ func load_lib(lib string, workernum int, database string) {
 			time.Sleep(time.Millisecond * 10)
 		} else {
 			atomic.AddInt32(&worker, 1)
-			go calc_avg_color(&imagefilelist[i], &worker, &done)
+			go calc_avg_color(&imagefilelist[i], &worker, &done, &donesize)
 			i++
 		}
 		if time.Now().Sub(last) >= time.Second {
@@ -212,8 +213,10 @@ func load_lib(lib string, workernum int, database string) {
 			if speed > 0 {
 				left = time.Duration(int64((len(imagefilelist)-int(done))/speed) * int64(time.Second)).String()
 			}
-			loggo.Info("load_lib calc image avg color speed %d/s %d%% %s %d %d %d %d", speed, int(done)*100/len(imagefilelist),
-				left, int(worker), int(done), len(imagefilelist), save_inter)
+			donesizem := donesize / 1024 / 1024
+			dataspeed := int(donesizem) / (int(time.Now().Sub(begin)) / int(time.Second))
+			loggo.Info("speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d saved=%d data=%dM dataspeed=%dM/s", speed, int(done)*100/len(imagefilelist),
+				left, int(worker), int(done), len(imagefilelist), save_inter, donesizem, dataspeed)
 		}
 	}
 
@@ -265,7 +268,7 @@ func make_key(r uint8, g uint8, b uint8) int {
 	return int(r)*256*256 + int(g)*256 + int(b)
 }
 
-func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32) {
+func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int64) {
 	defer common.CrashLog()
 	defer atomic.AddInt32(worker, -1)
 	defer atomic.AddInt32(done, 1)
@@ -279,6 +282,14 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32) {
 		return
 	}
 	defer reader.Close()
+
+	fi, err := reader.Stat()
+	if err != nil {
+		loggo.Error("calc_avg_color Stat fail %s %s", cfi.fi.Filename, err)
+		return
+	}
+	filesize := fi.Size()
+	defer atomic.AddInt64(donesize, filesize)
 
 	img, _, err := image.Decode(reader)
 	if err != nil {
