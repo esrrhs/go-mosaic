@@ -25,7 +25,7 @@ func main() {
 	src := flag.String("src", "", "src image path")
 	target := flag.String("target", "", "target image path")
 	lib := flag.String("lib", "", "lib image path")
-	worker := flag.Int("worker", 8, "worker thread num")
+	worker := flag.Int("worker", 10, "worker thread num")
 	database := flag.String("cache", "./database.bin", "cache datbase")
 
 	flag.Parse()
@@ -67,6 +67,12 @@ type FileInfo struct {
 	R        uint8
 	G        uint8
 	B        uint8
+}
+
+type CalFileInfo struct {
+	fi   FileInfo
+	ok   bool
+	done bool
 }
 
 type ImageData struct {
@@ -149,7 +155,7 @@ func load_lib(lib string, workernum int, database string) {
 	loggo.Info("load_lib load database ok")
 
 	loggo.Info("load_lib start get image file list")
-	imagefilelist := make([]FileInfo, 0)
+	imagefilelist := make([]CalFileInfo, 0)
 	cached := 0
 	filepath.Walk(lib, func(path string, f os.FileInfo, err error) error {
 
@@ -168,7 +174,7 @@ func load_lib(lib string, workernum int, database string) {
 			b := tx.Bucket([]byte("FileInfo"))
 			v := b.Get([]byte(path))
 			if v == nil {
-				imagefilelist = append(imagefilelist, FileInfo{path, 0, 0, 0})
+				imagefilelist = append(imagefilelist, CalFileInfo{fi: FileInfo{path, 0, 0, 0}})
 			} else {
 				cached++
 			}
@@ -185,18 +191,23 @@ func load_lib(lib string, workernum int, database string) {
 	begin := time.Now()
 	last := time.Now()
 	var done int32
-	for _, fi := range imagefilelist {
+
+	atomic.AddInt32(&worker, 1)
+	go save_to_database(&worker, imagefilelist, db)
+
+	for i, _ := range imagefilelist {
 		if worker > int32(workernum) {
 			atomic.AddInt32(&worker, 1)
-			calc_avg_color(fi, &worker, &done, db)
+			calc_avg_color(&imagefilelist[i], &worker, &done)
 		} else {
 			atomic.AddInt32(&worker, 1)
-			go calc_avg_color(fi, &worker, &done, db)
+			go calc_avg_color(&imagefilelist[i], &worker, &done)
 		}
 		if time.Now().Sub(last) >= time.Second {
 			last = time.Now()
 			speed := int(done) / (int(time.Now().Sub(begin)) / int(time.Second))
-			loggo.Info("load_lib calc image avg color speed %d/s %d%%", speed, int(done)*100/len(imagefilelist))
+			loggo.Info("load_lib calc image avg color speed %d/s %d%% %s", speed, int(done)*100/len(imagefilelist),
+				time.Duration(int64((len(imagefilelist)-int(done))/speed) * int64(time.Second)).String())
 		}
 	}
 
@@ -248,21 +259,24 @@ func make_key(r uint8, g uint8, b uint8) int {
 	return int(r)*256*256 + int(g)*256 + int(b)
 }
 
-func calc_avg_color(fi FileInfo, worker *int32, done *int32, db *bolt.DB) {
+func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32) {
 	defer common.CrashLog()
 	defer atomic.AddInt32(worker, -1)
 	defer atomic.AddInt32(done, 1)
+	defer func() {
+		cfi.done = true
+	}()
 
-	reader, err := os.Open(fi.Filename)
+	reader, err := os.Open(cfi.fi.Filename)
 	if err != nil {
-		loggo.Error("calc_avg_color Open fail %s %s", fi.Filename, err)
+		loggo.Error("calc_avg_color Open fail %s %s", cfi.fi.Filename, err)
 		return
 	}
 	defer reader.Close()
 
 	img, _, err := image.Decode(reader)
 	if err != nil {
-		loggo.Error("calc_avg_color Decode image fail %s %s", fi.Filename, err)
+		loggo.Error("calc_avg_color Decode image fail %s %s", cfi.fi.Filename, err)
 		return
 	}
 
@@ -282,27 +296,49 @@ func calc_avg_color(fi FileInfo, worker *int32, done *int32, db *bolt.DB) {
 		}
 	}
 
-	fi.R = uint8(sumR / count)
-	fi.G = uint8(sumG / count)
-	fi.B = uint8(sumB / count)
-
-	var b bytes.Buffer
-
-	enc := gob.NewEncoder(&b)
-	err = enc.Encode(&fi)
-	if err != nil {
-		loggo.Error("calc_avg_color Encode FileInfo fail %s %s", fi.Filename, err)
-		return
-	}
-
-	k := []byte(fi.Filename)
-	v := b.Bytes()
-
-	db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("FileInfo"))
-		err := b.Put(k, v)
-		return err
-	})
+	cfi.fi.R = uint8(sumR / count)
+	cfi.fi.G = uint8(sumG / count)
+	cfi.fi.B = uint8(sumB / count)
+	cfi.ok = true
 
 	return
+}
+
+func save_to_database(worker *int32, imagefilelist []CalFileInfo, db *bolt.DB) {
+	defer common.CrashLog()
+	defer atomic.AddInt32(worker, -1)
+
+	i := 0
+	for {
+		if i >= len(imagefilelist) {
+			return
+		}
+
+		cfi := imagefilelist[i]
+		if cfi.done {
+			i++
+			
+			if cfi.ok {
+				var b bytes.Buffer
+
+				enc := gob.NewEncoder(&b)
+				err := enc.Encode(&cfi.fi)
+				if err != nil {
+					loggo.Error("calc_avg_color Encode FileInfo fail %s %s", cfi.fi.Filename, err)
+					return
+				}
+
+				k := []byte(cfi.fi.Filename)
+				v := b.Bytes()
+
+				db.Update(func(tx *bolt.Tx) error {
+					b := tx.Bucket([]byte("FileInfo"))
+					err := b.Put(k, v)
+					return err
+				})
+			}
+		} else {
+			time.Sleep(time.Second)
+		}
+	}
 }
