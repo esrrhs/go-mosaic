@@ -27,7 +27,7 @@ func main() {
 	target := flag.String("target", "", "target image path")
 	lib := flag.String("lib", "", "lib image path")
 	worker := flag.Int("worker", 10, "worker thread num")
-	database := flag.String("cache", "./database.bin", "cache datbase")
+	database := flag.String("database", "./database.bin", "cache datbase")
 
 	flag.Parse()
 
@@ -204,11 +204,15 @@ func load_lib(lib string, workernum int, database string) {
 	})
 
 	i := 0
-	for i < len(imagefilelist) {
-		ret := tp.AddJobTimeout(int(common.RandInt()), i, 10)
-		if ret {
-			atomic.AddInt32(&worker, 1)
-			i++
+	for worker != 0 {
+		if i < len(imagefilelist) {
+			ret := tp.AddJobTimeout(int(common.RandInt()), i, 10)
+			if ret {
+				atomic.AddInt32(&worker, 1)
+				i++
+			}
+		} else {
+			time.Sleep(time.Millisecond * 10)
 		}
 		if time.Now().Sub(last) >= time.Second {
 			last = time.Now()
@@ -222,14 +226,6 @@ func load_lib(lib string, workernum int, database string) {
 			loggo.Info("speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d saved=%d data=%dM dataspeed=%dM/s", speed, int(done)*100/len(imagefilelist),
 				left, int(worker), int(done), len(imagefilelist), save_inter, donesizem, dataspeed)
 		}
-	}
-
-	for {
-		if worker == 0 {
-			time.Sleep(time.Second)
-			break
-		}
-		time.Sleep(time.Second)
 	}
 
 	loggo.Info("load_lib calc image avg color ok %d %d", len(imagefilelist), done)
@@ -367,7 +363,7 @@ func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, 
 
 			*save_inter = i
 		} else {
-			time.Sleep(time.Second)
+			time.Sleep(time.Millisecond * 10)
 		}
 	}
 }
