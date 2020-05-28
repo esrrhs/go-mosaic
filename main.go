@@ -5,6 +5,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"flag"
+	"fmt"
 	"github.com/boltdb/bolt"
 	"github.com/esrrhs/go-engine/src/common"
 	"github.com/esrrhs/go-engine/src/loggo"
@@ -13,9 +14,12 @@ import (
 	"image"
 	"image/color"
 	_ "image/gif"
+	"image/jpeg"
 	_ "image/jpeg"
+	"image/png"
 	_ "image/png"
 	"io/ioutil"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -42,6 +46,7 @@ func main() {
 	flag.Parse()
 
 	if *src == "" || *target == "" || *lib == "" {
+		fmt.Println("need src target lib")
 		flag.Usage()
 		return
 	}
@@ -49,6 +54,13 @@ func main() {
 		*scalealg != "ApproxBiLinear" &&
 		*scalealg != "BiLinear" &&
 		*scalealg != "CatmullRom" {
+		fmt.Println("scalealg type error")
+		flag.Usage()
+		return
+	}
+	if !strings.HasSuffix(strings.ToLower(*target), ".png") &&
+		!strings.HasSuffix(strings.ToLower(*target), ".jpg") {
+		fmt.Println("target type error, png/jpg")
 		flag.Usage()
 		return
 	}
@@ -65,7 +77,7 @@ func main() {
 	loggo.Info("target %s", *target)
 	loggo.Info("lib %s", *lib)
 
-	err := parse_src(*src)
+	err, srcimg := parse_src(*src)
 	if err != nil {
 		return
 	}
@@ -73,56 +85,37 @@ func main() {
 	if err != nil {
 		return
 	}
-	err = gen_target(*target)
+	err = gen_target(srcimg, *target, *worker, *database, *pixelsize)
 	if err != nil {
 		return
 	}
 }
 
-func parse_src(src string) error {
+func parse_src(src string) (error, image.Image) {
 	loggo.Info("parse_src %s", src)
 
 	reader, err := os.Open(src)
 	if err != nil {
 		loggo.Error("parse_src Open fail %s %s", src, err)
-		return err
+		return err, nil
 	}
 	defer reader.Close()
 
 	fi, err := reader.Stat()
 	if err != nil {
 		loggo.Error("parse_src Stat fail %s %s", src, err)
-		return err
+		return err, nil
 	}
 	filesize := fi.Size()
 
 	img, _, err := image.Decode(reader)
 	if err != nil {
 		loggo.Error("parse_src Decode image fail %s %s", src, err)
-		return err
-	}
-
-	bounds := img.Bounds()
-
-	startx := bounds.Min.X
-	starty := bounds.Min.Y
-	endx := bounds.Max.X
-	endy := bounds.Max.Y
-
-	for y := starty; y < endy; y++ {
-		for x := startx; x < endx; x++ {
-			//r, g, b, _ := img.At(x, y).RGBA()
-
-		}
+		return err, nil
 	}
 
 	loggo.Info("parse_src ok %s %d", src, filesize)
-	return nil
-}
-
-func gen_target(target string) error {
-	loggo.Info("gen_target %s", target)
-	return nil
+	return nil, img
 }
 
 type FileInfo struct {
@@ -293,6 +286,8 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 		for loading != 0 {
 			time.Sleep(time.Millisecond * 10)
 		}
+
+		tp.Stop()
 
 		for _, k := range need_del {
 			b.Delete([]byte(k))
@@ -561,7 +556,7 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int6
 
 	len = common.MinOfInt(bounds.Dx(), bounds.Dy())
 	if len < pixelsize {
-		loggo.Error("calc_avg_color image to small %s %d %d", cfi.fi.Filename, len, pixelsize)
+		loggo.Error("calc_avg_color image too small %s %d %d", cfi.fi.Filename, len, pixelsize)
 		return
 	}
 
@@ -650,4 +645,158 @@ func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, 
 			time.Sleep(time.Millisecond * 10)
 		}
 	}
+}
+
+func gen_target(srcimg image.Image, target string, workernum int, database string, pixelsize int) error {
+	loggo.Info("gen_target %s", target)
+
+	db, err := bolt.Open(database, 0600, nil)
+	if err != nil {
+		loggo.Error("gen_target Open database fail %s %s", database, err)
+		return err
+	}
+	defer db.Close()
+
+	bucket_name := "FileInfo" + strconv.Itoa(pixelsize)
+
+	bounds := srcimg.Bounds()
+
+	startx := bounds.Min.X
+	starty := bounds.Min.Y
+	endx := bounds.Max.X
+	endy := bounds.Max.Y
+
+	last := time.Now()
+	begin := time.Now()
+	total := bounds.Dx() * bounds.Dy()
+	var done int32
+	var doing int32
+
+	lenx := bounds.Dx() * pixelsize
+	leny := bounds.Dy() * pixelsize
+
+	outputfilesize := lenx * leny * 4 / 1024 / 1024 / 1024
+	if outputfilesize > 4 {
+		loggo.Error("gen_target too big %s %dG", target, outputfilesize)
+		return errors.New("too big")
+	}
+
+	loggo.Info("gen_target start gen pixel %s %dG", target, outputfilesize)
+
+	dst := image.NewRGBA(image.Rectangle{image.Point{0, 0}, image.Point{lenx, leny}})
+
+	type GenInfo struct {
+		x int
+		y int
+		c color.RGBA
+	}
+
+	tp := threadpool.NewThreadPool(workernum, 16, func(in interface{}) {
+		defer atomic.AddInt32(&done, 1)
+		defer atomic.AddInt32(&doing, -1)
+		gi := in.(GenInfo)
+		gen_target_pixel(gi.c, gi.x, gi.y, dst, db, bucket_name, pixelsize)
+	})
+
+	for y := starty; y < endy; y++ {
+		for x := startx; x < endx; x++ {
+			r, g, b, _ := srcimg.At(x, y).RGBA()
+			r, g, b = r>>8, g>>8, b>>8
+
+			for {
+				ret := tp.AddJobTimeout(int(common.RandInt()), GenInfo{x: x, y: y, c: color.RGBA{uint8(r), uint8(g), uint8(b), 0}}, 10)
+				if ret {
+					atomic.AddInt32(&doing, 1)
+					break
+				}
+			}
+
+			if time.Now().Sub(last) >= time.Second {
+				last = time.Now()
+				speed := int(done) / (int(time.Now().Sub(begin)) / int(time.Second))
+				left := ""
+				if speed > 0 {
+					left = time.Duration(int64((total-int(done))/speed) * int64(time.Second)).String()
+				}
+				loggo.Info("gen speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d", speed, int(done)*100/total,
+					left, int(doing), int(done), total)
+			}
+		}
+	}
+
+	for doing != 0 {
+		time.Sleep(time.Millisecond * 10)
+	}
+
+	tp.Stop()
+
+	loggo.Info("gen_target gen pixel ok %s", target)
+
+	loggo.Info("gen_target start write file %s", target)
+	dstFile, err := os.Create(target)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dstFile.Close()
+
+	if strings.HasSuffix(strings.ToLower(target), ".png") {
+		err = png.Encode(dstFile, dst)
+	} else if strings.HasSuffix(strings.ToLower(target), ".jpg") {
+		err = jpeg.Encode(dstFile, dst, &jpeg.Options{Quality: 100})
+	}
+	if err != nil {
+		loggo.Error("gen_target Encode fail %s %s", target, err)
+		return err
+	}
+
+	loggo.Info("gen_target write file ok %s", target)
+
+	return nil
+}
+
+func gen_target_pixel(src color.RGBA, x int, y int, dst *image.RGBA, db *bolt.DB, bucket_name string, pixelsize int) {
+
+	mindiff := math.MaxFloat64
+	var mindiffname string
+	db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket_name))
+		b.ForEach(func(k, v []byte) error {
+
+			var b bytes.Buffer
+			b.Write(v)
+
+			dec := gob.NewDecoder(&b)
+			var fi FileInfo
+			err := dec.Decode(&fi)
+			if err != nil {
+				loggo.Error("gen_target_pixel database Decode fail %s %s", string(k), err)
+				return nil
+			}
+
+			tmp := color.RGBA{fi.R, fi.G, fi.B, 0}
+			diff := common.ColorDistance(src, tmp)
+			if diff < mindiff {
+				mindiff = diff
+				mindiffname = fi.Filename
+			}
+
+			return nil
+		})
+		return nil
+	})
+
+	reader, err := os.Open(mindiffname)
+	if err != nil {
+		loggo.Error("gen_target_pixel Open fail %s %s", mindiffname, err)
+		return
+	}
+	defer reader.Close()
+
+	minimg, _, err := image.Decode(reader)
+	if err != nil {
+		loggo.Error("gen_target_pixel Decode fail %s %s", mindiffname, err)
+		return
+	}
+
+	draw.Copy(dst, image.Point{x * pixelsize, y * pixelsize}, minimg, minimg.Bounds(), draw.Over, nil)
 }
