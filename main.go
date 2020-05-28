@@ -9,11 +9,14 @@ import (
 	"github.com/esrrhs/go-engine/src/loggo"
 	"github.com/esrrhs/go-engine/src/threadpool"
 	"image"
+	"image/color"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -239,6 +242,7 @@ func load_lib(lib string, workernum int, database string) {
 	loggo.Info("load_lib start save image avg color")
 
 	maxcolornum := 0
+	totalnum := 0
 	db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("FileInfo"))
 
@@ -260,6 +264,7 @@ func load_lib(lib string, workernum int, database string) {
 			if len(gcolordata[key].filename) > maxcolornum {
 				maxcolornum = len(gcolordata[key].filename)
 			}
+			totalnum++
 
 			return nil
 		})
@@ -267,11 +272,71 @@ func load_lib(lib string, workernum int, database string) {
 		return nil
 	})
 
-	loggo.Info("load_lib save image avg color ok max %d", maxcolornum)
+	loggo.Info("load_lib save image avg color ok total %d max %d", totalnum, maxcolornum)
+
+	tmpcolornum := make(map[int]int)
+	tmpcolorone := make(map[int]ImageData)
+	colorgourp := []struct {
+		name string
+		c    color.RGBA
+		num  int
+	}{
+		{"Black 	", common.Black, 0},
+		{"White 	", common.White, 0},
+		{"Red 	", common.Red, 0},
+		{"Lime 	", common.Lime, 0},
+		{"Blue 	", common.Blue, 0},
+		{"Yellow ", common.Yellow, 0},
+		{"Cyan	", common.Cyan, 0},
+		{"Magenta", common.Magenta, 0},
+		{"Silver ", common.Silver, 0},
+		{"Gray 	", common.Gray, 0},
+		{"Maroon ", common.Maroon, 0},
+		{"Olive 	", common.Olive, 0},
+		{"Green 	", common.Green, 0},
+		{"Purple	", common.Purple, 0},
+		{"Teal 	", common.Teal, 0},
+		{"Navy 	", common.Navy, 0},
+	}
+
+	for _, data := range gcolordata {
+		tmpcolornum[len(data.filename)]++
+		tmpcolorone[len(data.filename)] = data
+
+		if len(data.filename) > 0 {
+			min := 0
+			mindistance := math.MaxFloat64
+			for index, cg := range colorgourp {
+				diff := common.ColorDistance(color.RGBA{data.r, data.g, data.b, 0}, cg.c)
+				if diff < mindistance {
+					min = index
+					mindistance = diff
+				}
+			}
+
+			colorgourp[min].num++
+		}
+	}
+
+	for i := 0; i <= maxcolornum; i++ {
+		str := ""
+		if tmpcolornum[i] == 1 {
+			str = make_string(tmpcolorone[i].r, tmpcolorone[i].g, tmpcolorone[i].b)
+		}
+		loggo.Info("load_lib avg color num distribution %d = %d %s", i, tmpcolornum[i], str)
+	}
+
+	for _, cg := range colorgourp {
+		loggo.Info("load_lib avg color color distribution %s = %d", cg.name, cg.num)
+	}
 }
 
 func make_key(r uint8, g uint8, b uint8) int {
 	return int(r)*256*256 + int(g)*256 + int(b)
+}
+
+func make_string(r uint8, g uint8, b uint8) string {
+	return "r " + strconv.Itoa(int(r)) + " g " + strconv.Itoa(int(g)) + " b " + strconv.Itoa(int(b))
 }
 
 func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int64) {
