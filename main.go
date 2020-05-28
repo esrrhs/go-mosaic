@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/gob"
+	"errors"
 	"flag"
 	"github.com/boltdb/bolt"
 	"github.com/esrrhs/go-engine/src/common"
 	"github.com/esrrhs/go-engine/src/loggo"
 	"github.com/esrrhs/go-engine/src/threadpool"
+	"golang.org/x/image/draw"
 	"image"
 	"image/color"
 	_ "image/gif"
@@ -31,10 +33,19 @@ func main() {
 	lib := flag.String("lib", "", "lib image path")
 	worker := flag.Int("worker", 10, "worker thread num")
 	database := flag.String("database", "./database.bin", "cache datbase")
+	pixelsize := flag.Int("pixelsize", 128, "pic scale size per one pixel")
+	scalealg := flag.String("scalealg", "CatmullRom", "pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom")
 
 	flag.Parse()
 
 	if *src == "" || *target == "" || *lib == "" {
+		flag.Usage()
+		return
+	}
+	if *scalealg != "NearestNeighbor" &&
+		*scalealg != "ApproxBiLinear" &&
+		*scalealg != "BiLinear" &&
+		*scalealg != "CatmullRom" {
 		flag.Usage()
 		return
 	}
@@ -51,19 +62,64 @@ func main() {
 	loggo.Info("target %s", *target)
 	loggo.Info("lib %s", *lib)
 
-	parse_src(*src)
-	load_lib(*lib, *worker, *database)
-	gen_target(*target)
+	err := parse_src(*src)
+	if err != nil {
+		return
+	}
+	err = load_lib(*lib, *worker, *database, *pixelsize, *scalealg)
+	if err != nil {
+		return
+	}
+	err = gen_target(*target)
+	if err != nil {
+		return
+	}
 }
 
-func parse_src(src string) {
+func parse_src(src string) error {
 	loggo.Info("parse_src %s", src)
 
+	reader, err := os.Open(src)
+	if err != nil {
+		loggo.Error("parse_src Open fail %s %s", src, err)
+		return err
+	}
+	defer reader.Close()
+
+	fi, err := reader.Stat()
+	if err != nil {
+		loggo.Error("parse_src Stat fail %s %s", src, err)
+		return err
+	}
+	filesize := fi.Size()
+
+	img, _, err := image.Decode(reader)
+	if err != nil {
+		loggo.Error("parse_src Decode image fail %s %s", src, err)
+		return err
+	}
+
+	bounds := img.Bounds()
+
+	startx := bounds.Min.X
+	starty := bounds.Min.Y
+	endx := bounds.Max.X
+	endy := bounds.Max.Y
+
+	for y := starty; y < endy; y++ {
+		for x := startx; x < endx; x++ {
+			//r, g, b, _ := img.At(x, y).RGBA()
+
+		}
+	}
+
+	loggo.Info("parse_src ok %s %d", src, filesize)
+	return nil
 }
 
-func gen_target(target string) {
+func gen_target(target string) error {
 	loggo.Info("gen_target %s", target)
-
+	return nil
 }
 
 type FileInfo struct {
@@ -79,24 +135,22 @@ type CalFileInfo struct {
 	done bool
 }
 
-type ImageData struct {
-	filename []string
-	index    int
-	r        uint8
-	g        uint8
-	b        uint8
+type ColorData struct {
+	file int
+	r    uint8
+	g    uint8
+	b    uint8
 }
 
-var gcolordata []ImageData
-
-func load_lib(lib string, workernum int, database string) {
+func load_lib(lib string, workernum int, database string, pixelsize int, scalealg string) error {
 	loggo.Info("load_lib %s", lib)
 
 	loggo.Info("load_lib start ini database")
+	var colordata []ColorData
 	for i := 0; i <= 255; i++ {
 		for j := 0; j <= 255; j++ {
 			for z := 0; z <= 255; z++ {
-				gcolordata = append(gcolordata, ImageData{})
+				colordata = append(colordata, ColorData{})
 			}
 		}
 	}
@@ -105,7 +159,7 @@ func load_lib(lib string, workernum int, database string) {
 		for j := 0; j <= 255; j++ {
 			for z := 0; z <= 255; z++ {
 				k := make_key(uint8(i), uint8(j), uint8(z))
-				gcolordata[k].r, gcolordata[k].g, gcolordata[k].b = uint8(i), uint8(j), uint8(z)
+				colordata[k].r, colordata[k].g, colordata[k].b = uint8(i), uint8(j), uint8(z)
 			}
 		}
 	}
@@ -117,12 +171,15 @@ func load_lib(lib string, workernum int, database string) {
 	db, err := bolt.Open(database, 0600, nil)
 	if err != nil {
 		loggo.Error("load_lib Open database fail %s %s", database, err)
+		return err
 	}
 	defer db.Close()
 
+	bucket_name := "FileInfo" + strconv.Itoa(pixelsize)
+
 	db.Update(func(tx *bolt.Tx) error {
-		tx.CreateBucketIfNotExists([]byte("FileInfo"))
-		b := tx.Bucket([]byte("FileInfo"))
+		tx.CreateBucketIfNotExists([]byte(bucket_name))
+		b := tx.Bucket([]byte(bucket_name))
 
 		need_del := make([]string, 0)
 
@@ -181,7 +238,7 @@ func load_lib(lib string, workernum int, database string) {
 		}
 
 		db.View(func(tx *bolt.Tx) error {
-			b := tx.Bucket([]byte("FileInfo"))
+			b := tx.Bucket([]byte(bucket_name))
 			v := b.Get([]byte(abspath))
 			if v == nil {
 				imagefilelist = append(imagefilelist, CalFileInfo{fi: FileInfo{abspath, 0, 0, 0}})
@@ -205,11 +262,22 @@ func load_lib(lib string, workernum int, database string) {
 
 	atomic.AddInt32(&worker, 1)
 	var save_inter int
-	go save_to_database(&worker, &imagefilelist, db, &save_inter)
+	go save_to_database(&worker, &imagefilelist, db, &save_inter, bucket_name)
+
+	var scale draw.Scaler
+	if scalealg == "NearestNeighbor" {
+		scale = draw.NearestNeighbor
+	} else if scalealg == "ApproxBiLinear" {
+		scale = draw.ApproxBiLinear
+	} else if scalealg == "BiLinear" {
+		scale = draw.BiLinear
+	} else if scalealg == "CatmullRom" {
+		scale = draw.CatmullRom
+	}
 
 	tp := threadpool.NewThreadPool(workernum, 16, func(in interface{}) {
 		i := in.(int)
-		calc_avg_color(&imagefilelist[i], &worker, &done, &donesize)
+		calc_avg_color(&imagefilelist[i], &worker, &done, &donesize, scale, pixelsize)
 	})
 
 	i := 0
@@ -244,7 +312,7 @@ func load_lib(lib string, workernum int, database string) {
 	maxcolornum := 0
 	totalnum := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("FileInfo"))
+		b := tx.Bucket([]byte(bucket_name))
 
 		b.ForEach(func(k, v []byte) error {
 
@@ -260,9 +328,9 @@ func load_lib(lib string, workernum int, database string) {
 			}
 
 			key := make_key(fi.R, fi.G, fi.B)
-			gcolordata[key].filename = append(gcolordata[key].filename, fi.Filename)
-			if len(gcolordata[key].filename) > maxcolornum {
-				maxcolornum = len(gcolordata[key].filename)
+			colordata[key].file++
+			if colordata[key].file > maxcolornum {
+				maxcolornum = colordata[key].file
 			}
 			totalnum++
 
@@ -274,8 +342,13 @@ func load_lib(lib string, workernum int, database string) {
 
 	loggo.Info("load_lib save image avg color ok total %d max %d", totalnum, maxcolornum)
 
+	if totalnum <= 0 {
+		loggo.Error("load_lib no pic in lib %s", database)
+		return errors.New("no pic")
+	}
+
 	tmpcolornum := make(map[int]int)
-	tmpcolorone := make(map[int]ImageData)
+	tmpcolorone := make(map[int]ColorData)
 	colorgourp := []struct {
 		name string
 		c    color.RGBA
@@ -299,11 +372,11 @@ func load_lib(lib string, workernum int, database string) {
 		{"Navy", common.Navy, 0},
 	}
 
-	for _, data := range gcolordata {
-		tmpcolornum[len(data.filename)]++
-		tmpcolorone[len(data.filename)] = data
+	for _, data := range colordata {
+		tmpcolornum[data.file]++
+		tmpcolorone[data.file] = data
 
-		if len(data.filename) > 0 {
+		if data.file > 0 {
 			min := 0
 			mindistance := math.MaxFloat64
 			for index, cg := range colorgourp {
@@ -314,7 +387,7 @@ func load_lib(lib string, workernum int, database string) {
 				}
 			}
 
-			colorgourp[min].num++
+			colorgourp[min].num += data.file
 		}
 	}
 
@@ -336,6 +409,8 @@ func load_lib(lib string, workernum int, database string) {
 		}
 	}
 	loggo.Info("load_lib avg color color max %s %d", colorgourp[maxcolorgroupindex].name, colorgourp[maxcolorgroupindex].num)
+
+	return nil
 }
 
 func make_key(r uint8, g uint8, b uint8) int {
@@ -346,7 +421,7 @@ func make_string(r uint8, g uint8, b uint8) string {
 	return "r " + strconv.Itoa(int(r)) + " g " + strconv.Itoa(int(g)) + " b " + strconv.Itoa(int(b))
 }
 
-func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int64) {
+func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int64, scaler draw.Scaler, pixelsize int) {
 	defer common.CrashLog()
 	defer atomic.AddInt32(worker, -1)
 	defer atomic.AddInt32(done, 1)
@@ -383,11 +458,39 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int6
 	endx := common.MinOfInt(startx+len, bounds.Max.X)
 	endy := common.MinOfInt(starty+len, bounds.Max.Y)
 
+	if startx != bounds.Min.X || starty != bounds.Min.Y || endx != bounds.Max.X || endy != bounds.Max.Y {
+		dst := image.NewRGBA(image.Rectangle{image.Point{0, 0}, image.Point{len, len}})
+		draw.Copy(dst, image.Point{0, 0}, img, image.Rectangle{image.Point{startx, starty}, image.Point{endx, endy}}, draw.Over, nil)
+		img = dst
+	}
+
+	bounds = img.Bounds()
+	if bounds.Dx() != bounds.Dy() {
+		loggo.Error("calc_avg_color cult image fail %s %d %d", cfi.fi.Filename, bounds.Dx(), bounds.Dy())
+		return
+	}
+
+	len = common.MinOfInt(bounds.Dx(), bounds.Dy())
+	if len < pixelsize {
+		loggo.Error("calc_avg_color image to small %s %d %d", cfi.fi.Filename, len, pixelsize)
+		return
+	}
+
+	if len > pixelsize {
+		rect := image.Rectangle{image.Point{0, 0}, image.Point{pixelsize, pixelsize}}
+		dst := image.NewRGBA(rect)
+		scaler.Scale(dst, rect, img, img.Bounds(), draw.Over, nil)
+		img = dst
+	}
+
+	bounds = img.Bounds()
+
 	var sumR, sumG, sumB, count float64
 
-	for y := starty; y < endy; y++ {
-		for x := startx; x < endx; x++ {
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			r, g, b, _ := img.At(x, y).RGBA()
+			r, g, b = r>>8, g>>8, b>>8
 
 			sumR += float64(r)
 			sumG += float64(g)
@@ -405,7 +508,7 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int6
 	return
 }
 
-func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, save_inter *int) {
+func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, save_inter *int, bucket_name string) {
 	defer common.CrashLog()
 	defer atomic.AddInt32(worker, -1)
 
@@ -433,7 +536,7 @@ func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, 
 				v := b.Bytes()
 
 				db.Update(func(tx *bolt.Tx) error {
-					b := tx.Bucket([]byte("FileInfo"))
+					b := tx.Bucket([]byte(bucket_name))
 					err := b.Put(k, v)
 					return err
 				})
