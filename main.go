@@ -171,11 +171,17 @@ func load_lib(lib string, workernum int, database string) {
 			return nil
 		}
 
+		abspath, err := filepath.Abs(path)
+		if err != nil {
+			loggo.Error("load_lib get Abs fail %s %s %s", database, path, err)
+			return nil
+		}
+
 		db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte("FileInfo"))
-			v := b.Get([]byte(path))
+			v := b.Get([]byte(abspath))
 			if v == nil {
-				imagefilelist = append(imagefilelist, CalFileInfo{fi: FileInfo{path, 0, 0, 0}})
+				imagefilelist = append(imagefilelist, CalFileInfo{fi: FileInfo{abspath, 0, 0, 0}})
 			} else {
 				cached++
 			}
