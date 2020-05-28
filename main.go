@@ -42,6 +42,7 @@ func main() {
 	pixelsize := flag.Int("pixelsize", 256, "pic scale size per one pixel")
 	scalealg := flag.String("scalealg", "CatmullRom", "pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom")
 	checkhash := flag.Bool("checkhash", true, "check database pic hash")
+	maxsize := flag.Int("maxsize", 4, "pic max size in GB")
 
 	flag.Parse()
 
@@ -85,7 +86,7 @@ func main() {
 	if err != nil {
 		return
 	}
-	err = gen_target(srcimg, *target, *worker, *database, *pixelsize)
+	err = gen_target(srcimg, *target, *worker, *database, *pixelsize, *maxsize)
 	if err != nil {
 		return
 	}
@@ -647,7 +648,7 @@ func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, 
 	}
 }
 
-func gen_target(srcimg image.Image, target string, workernum int, database string, pixelsize int) error {
+func gen_target(srcimg image.Image, target string, workernum int, database string, pixelsize int, maxsize int) error {
 	loggo.Info("gen_target %s", target)
 
 	db, err := bolt.Open(database, 0600, nil)
@@ -676,12 +677,12 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 	leny := bounds.Dy() * pixelsize
 
 	outputfilesize := lenx * leny * 4 / 1024 / 1024 / 1024
-	if outputfilesize > 4 {
-		loggo.Error("gen_target too big %s %dG", target, outputfilesize)
+	if outputfilesize > maxsize {
+		loggo.Error("gen_target too big %s %dG than %dG", target, outputfilesize, maxsize)
 		return errors.New("too big")
 	}
 
-	loggo.Info("gen_target start gen pixel %s %dG", target, outputfilesize)
+	loggo.Info("gen_target start gen pixel %s %dG max %dG", target, outputfilesize, maxsize)
 
 	dst := image.NewRGBA(image.Rectangle{image.Point{0, 0}, image.Point{lenx, leny}})
 
