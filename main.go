@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -36,6 +37,7 @@ func main() {
 	database := flag.String("database", "./database.bin", "cache datbase")
 	pixelsize := flag.Int("pixelsize", 256, "pic scale size per one pixel")
 	scalealg := flag.String("scalealg", "CatmullRom", "pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom")
+	checkhash := flag.Bool("checkhash", true, "check database pic hash")
 
 	flag.Parse()
 
@@ -67,7 +69,7 @@ func main() {
 	if err != nil {
 		return
 	}
-	err = load_lib(*lib, *worker, *database, *pixelsize, *scalealg)
+	err = load_lib(*lib, *worker, *database, *pixelsize, *scalealg, *checkhash)
 	if err != nil {
 		return
 	}
@@ -144,7 +146,7 @@ type ColorData struct {
 	b    uint8
 }
 
-func load_lib(lib string, workernum int, database string, pixelsize int, scalealg string) error {
+func load_lib(lib string, workernum int, database string, pixelsize int, scalealg string, checkhash bool) error {
 	loggo.Info("load_lib %s", lib)
 
 	loggo.Info("load_lib start ini database")
@@ -179,55 +181,118 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 
 	bucket_name := "FileInfo" + strconv.Itoa(pixelsize)
 
-	db.Update(func(tx *bolt.Tx) error {
+	dbtotal := 0
+	db.View(func(tx *bolt.Tx) error {
 		tx.CreateBucketIfNotExists([]byte(bucket_name))
+		b := tx.Bucket([]byte(bucket_name))
+		b.ForEach(func(k, v []byte) error {
+			dbtotal++
+			return nil
+		})
+		return nil
+	})
+
+	lastload := time.Now()
+	beginload := time.Now()
+	var doneload int32
+	var loading int32
+	var doneloadsize int64
+	var lock sync.Mutex
+	db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket_name))
 
 		need_del := make([]string, 0)
 
-		b.ForEach(func(k, v []byte) error {
+		type LoadFileInfo struct {
+			k, v []byte
+		}
+
+		tp := threadpool.NewThreadPool(workernum, 16, func(in interface{}) {
+			defer atomic.AddInt32(&doneload, 1)
+			defer atomic.AddInt32(&loading, -1)
+
+			lf := in.(LoadFileInfo)
 
 			var b bytes.Buffer
-			b.Write(v)
+			b.Write(lf.v)
 
 			dec := gob.NewDecoder(&b)
 			var fi FileInfo
 			err = dec.Decode(&fi)
 			if err != nil {
-				loggo.Error("load_lib Open database Decode fail %s %s %s", database, string(k), err)
-				need_del = append(need_del, string(k))
-				return nil
+				loggo.Error("load_lib Open database Decode fail %s %s %s", database, string(lf.k), err)
+				lock.Lock()
+				defer lock.Unlock()
+				need_del = append(need_del, string(lf.k))
+				return
 			}
 
-			if _, err := os.Stat(fi.Filename); os.IsNotExist(err) {
+			osfi, err := os.Stat(fi.Filename)
+			if err != nil && os.IsNotExist(err) {
 				loggo.Error("load_lib Open Filename IsNotExist, need delete %s %s %s", database, fi.Filename, err)
-				need_del = append(need_del, string(k))
-				return nil
+				lock.Lock()
+				defer lock.Unlock()
+				need_del = append(need_del, string(lf.k))
+				return
 			}
 
-			reader, err := os.Open(fi.Filename)
-			if err != nil {
-				loggo.Error("load_lib Open fail %s %s %s", database, fi.Filename, err)
-				return nil
+			defer atomic.AddInt64(&doneloadsize, osfi.Size())
+
+			if checkhash {
+				reader, err := os.Open(fi.Filename)
+				if err != nil {
+					loggo.Error("load_lib Open fail %s %s %s", database, fi.Filename, err)
+					return
+				}
+				defer reader.Close()
+
+				bytes, err := ioutil.ReadAll(reader)
+				if err != nil {
+					loggo.Error("load_lib ReadAll fail %s %s %s", database, fi.Filename, err)
+					return
+				}
+
+				hashstr := common.GetXXHashString(string(bytes))
+
+				if hashstr != fi.Hash {
+					loggo.Error("load_lib hash diff need delete %s %s %s %s", database, fi.Filename, hashstr, fi.Hash)
+					lock.Lock()
+					defer lock.Unlock()
+					need_del = append(need_del, string(lf.k))
+					return
+				}
 			}
-			defer reader.Close()
+		})
 
-			bytes, err := ioutil.ReadAll(reader)
-			if err != nil {
-				loggo.Error("load_lib ReadAll fail %s %s %s", database, fi.Filename, err)
-				return nil
+		b.ForEach(func(k, v []byte) error {
+
+			for {
+				ret := tp.AddJobTimeout(int(common.RandInt()), LoadFileInfo{k, v}, 10)
+				if ret {
+					atomic.AddInt32(&loading, 1)
+					break
+				}
 			}
 
-			hashstr := common.GetXXHashString(string(bytes))
-
-			if hashstr != fi.Hash {
-				loggo.Error("load_lib hash diff need delete %s %s %s %s", database, fi.Filename, hashstr, fi.Hash)
-				need_del = append(need_del, string(k))
-				return nil
+			if time.Now().Sub(lastload) >= time.Second {
+				lastload = time.Now()
+				speed := int(doneload) / (int(time.Now().Sub(beginload)) / int(time.Second))
+				left := ""
+				if speed > 0 {
+					left = time.Duration(int64((dbtotal-int(doneload))/speed) * int64(time.Second)).String()
+				}
+				donesizem := doneloadsize / 1024 / 1024
+				dataspeed := int(donesizem) / (int(time.Now().Sub(beginload)) / int(time.Second))
+				loggo.Info("load speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d data=%dM dataspeed=%dM/s", speed, int(doneload)*100/dbtotal, left,
+					loading, doneload, dbtotal, donesizem, dataspeed)
 			}
 
 			return nil
 		})
+
+		for loading != 0 {
+			time.Sleep(time.Millisecond * 10)
+		}
 
 		for _, k := range need_del {
 			b.Delete([]byte(k))
@@ -323,10 +388,11 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 			}
 			donesizem := donesize / 1024 / 1024
 			dataspeed := int(donesizem) / (int(time.Now().Sub(begin)) / int(time.Second))
-			loggo.Info("speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d saved=%d data=%dM dataspeed=%dM/s", speed, int(done)*100/len(imagefilelist),
+			loggo.Info("calc speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d saved=%d data=%dM dataspeed=%dM/s", speed, int(done)*100/len(imagefilelist),
 				left, int(worker), int(done), len(imagefilelist), save_inter, donesizem, dataspeed)
 		}
 	}
+	tp.Stop()
 
 	loggo.Info("load_lib calc image avg color ok %d %d", len(imagefilelist), done)
 
