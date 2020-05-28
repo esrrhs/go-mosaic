@@ -32,7 +32,7 @@ func main() {
 	src := flag.String("src", "", "src image path")
 	target := flag.String("target", "", "target image path")
 	lib := flag.String("lib", "", "lib image path")
-	worker := flag.Int("worker", 10, "worker thread num")
+	worker := flag.Int("worker", 16, "worker thread num")
 	database := flag.String("database", "./database.bin", "cache datbase")
 	pixelsize := flag.Int("pixelsize", 256, "pic scale size per one pixel")
 	scalealg := flag.String("scalealg", "CatmullRom", "pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom")
