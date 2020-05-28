@@ -12,6 +12,28 @@ go-mosaic是一个制作相片馬賽克的工具。相片馬賽克，或稱蒙�
 ```
 go-mosaic.exe -src input.jpg -target output.jpg -lib E:\pic
 ```
+* 更多参数，参考help
+```
+Usage of D:\project\go-mosaic\aa.exe:
+  -checkhash
+    	check database pic hash (default true)
+  -database string
+    	cache datbase (default "./database.bin")
+  -lib string
+    	lib image path
+  -maxsize int
+    	pic max size in GB (default 4)
+  -pixelsize int
+    	pic scale size per one pixel (default 256)
+  -scalealg string
+    	pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom (default "CatmullRom")
+  -src string
+    	src image path
+  -target string
+    	target image path
+  -worker int
+    	worker thread num (default 12)
+```
 
 # 示例
 
