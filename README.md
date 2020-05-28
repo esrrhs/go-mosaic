@@ -6,11 +6,11 @@ go-mosaic是一个制作相片馬賽克的工具。相片馬賽克，或稱蒙�
 * 多核构建提升生成速度
 
 # 使用
-* 准备好一个图片文件夹，用来组成最终图片的元素，假设为E:\pic
+* 准备好一个图片文件夹，用来组成最终图片的元素，假设为./pic
 * 准备好一张目标图片，用来生成在最终的大图，假设为input.jpg，生成的大图为output.jpg
 * 输入命令，等待完成
 ```
-go-mosaic.exe -src input.jpg -target output.jpg -lib E:\pic
+go-mosaic.exe -src input.jpg -target output.jpg -lib ./pic
 ```
 * 更多参数，参考help
 ```
