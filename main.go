@@ -15,6 +15,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"io/ioutil"
 	"math"
 	"os"
 	"path/filepath"
@@ -127,6 +128,7 @@ type FileInfo struct {
 	R        uint8
 	G        uint8
 	B        uint8
+	MD5      string
 }
 
 type CalFileInfo struct {
@@ -203,6 +205,27 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 				return nil
 			}
 
+			reader, err := os.Open(fi.Filename)
+			if err != nil {
+				loggo.Error("load_lib Open fail %s %s %s", database, fi.Filename, err)
+				return nil
+			}
+			defer reader.Close()
+
+			bytes, err := ioutil.ReadAll(reader)
+			if err != nil {
+				loggo.Error("load_lib ReadAll fail %s %s %s", database, fi.Filename, err)
+				return nil
+			}
+
+			md5str := common.GetMd5String(string(bytes))
+
+			if md5str != fi.MD5 {
+				loggo.Error("load_lib MD5 diff need delete %s %s %s %s", database, fi.Filename, md5str, fi.MD5)
+				need_del = append(need_del, string(k))
+				return nil
+			}
+
 			return nil
 		})
 
@@ -237,11 +260,26 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 			return nil
 		}
 
+		reader, err := os.Open(abspath)
+		if err != nil {
+			loggo.Error("load_lib Open fail %s %s %s", database, abspath, err)
+			return nil
+		}
+		defer reader.Close()
+
+		b, err := ioutil.ReadAll(reader)
+		if err != nil {
+			loggo.Error("load_lib ReadAll fail %s %s %s", database, abspath, err)
+			return nil
+		}
+
+		md5str := common.GetMd5String(string(b))
+
 		db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte(bucket_name))
 			v := b.Get([]byte(abspath))
 			if v == nil {
-				imagefilelist = append(imagefilelist, CalFileInfo{fi: FileInfo{abspath, 0, 0, 0}})
+				imagefilelist = append(imagefilelist, CalFileInfo{fi: FileInfo{abspath, 0, 0, 0, md5str}})
 			} else {
 				cached++
 			}
