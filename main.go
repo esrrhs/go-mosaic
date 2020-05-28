@@ -281,22 +281,22 @@ func load_lib(lib string, workernum int, database string) {
 		c    color.RGBA
 		num  int
 	}{
-		{"Black 	", common.Black, 0},
-		{"White 	", common.White, 0},
-		{"Red 	", common.Red, 0},
-		{"Lime 	", common.Lime, 0},
-		{"Blue 	", common.Blue, 0},
-		{"Yellow ", common.Yellow, 0},
-		{"Cyan	", common.Cyan, 0},
+		{"Black", common.Black, 0},
+		{"White", common.White, 0},
+		{"Red", common.Red, 0},
+		{"Lime", common.Lime, 0},
+		{"Blue", common.Blue, 0},
+		{"Yellow", common.Yellow, 0},
+		{"Cyan", common.Cyan, 0},
 		{"Magenta", common.Magenta, 0},
-		{"Silver ", common.Silver, 0},
-		{"Gray 	", common.Gray, 0},
-		{"Maroon ", common.Maroon, 0},
-		{"Olive 	", common.Olive, 0},
-		{"Green 	", common.Green, 0},
-		{"Purple	", common.Purple, 0},
-		{"Teal 	", common.Teal, 0},
-		{"Navy 	", common.Navy, 0},
+		{"Silver", common.Silver, 0},
+		{"Gray", common.Gray, 0},
+		{"Maroon", common.Maroon, 0},
+		{"Olive", common.Olive, 0},
+		{"Green", common.Green, 0},
+		{"Purple", common.Purple, 0},
+		{"Teal", common.Teal, 0},
+		{"Navy", common.Navy, 0},
 	}
 
 	for _, data := range gcolordata {
@@ -326,9 +326,16 @@ func load_lib(lib string, workernum int, database string) {
 		loggo.Info("load_lib avg color num distribution %d = %d %s", i, tmpcolornum[i], str)
 	}
 
-	for _, cg := range colorgourp {
+	maxcolorgroupnum := 0
+	maxcolorgroupindex := 0
+	for index, cg := range colorgourp {
 		loggo.Info("load_lib avg color color distribution %s = %d", cg.name, cg.num)
+		if cg.num > maxcolorgroupnum {
+			maxcolorgroupnum = cg.num
+			maxcolorgroupindex = index
+		}
 	}
+	loggo.Info("load_lib avg color color max %s %d", colorgourp[maxcolorgroupindex].name, colorgourp[maxcolorgroupindex].num)
 }
 
 func make_key(r uint8, g uint8, b uint8) int {
