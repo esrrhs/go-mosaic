@@ -36,7 +36,6 @@ func main() {
 	database := flag.String("database", "./database.bin", "cache datbase")
 	pixelsize := flag.Int("pixelsize", 256, "pic scale size per one pixel")
 	scalealg := flag.String("scalealg", "CatmullRom", "pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom")
-	checkhash := flag.Bool("checkhash", false, "check hash")
 
 	flag.Parse()
 
@@ -68,7 +67,7 @@ func main() {
 	if err != nil {
 		return
 	}
-	err = load_lib(*lib, *worker, *database, *pixelsize, *scalealg, *checkhash)
+	err = load_lib(*lib, *worker, *database, *pixelsize, *scalealg)
 	if err != nil {
 		return
 	}
@@ -145,7 +144,7 @@ type ColorData struct {
 	b    uint8
 }
 
-func load_lib(lib string, workernum int, database string, pixelsize int, scalealg string, checkhash bool) error {
+func load_lib(lib string, workernum int, database string, pixelsize int, scalealg string) error {
 	loggo.Info("load_lib %s", lib)
 
 	loggo.Info("load_lib start ini database")
@@ -206,27 +205,25 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 				return nil
 			}
 
-			if checkhash{
-				reader, err := os.Open(fi.Filename)
-				if err != nil {
-					loggo.Error("load_lib Open fail %s %s %s", database, fi.Filename, err)
-					return nil
-				}
-				defer reader.Close()
+			reader, err := os.Open(fi.Filename)
+			if err != nil {
+				loggo.Error("load_lib Open fail %s %s %s", database, fi.Filename, err)
+				return nil
+			}
+			defer reader.Close()
 
-				bytes, err := ioutil.ReadAll(reader)
-				if err != nil {
-					loggo.Error("load_lib ReadAll fail %s %s %s", database, fi.Filename, err)
-					return nil
-				}
+			bytes, err := ioutil.ReadAll(reader)
+			if err != nil {
+				loggo.Error("load_lib ReadAll fail %s %s %s", database, fi.Filename, err)
+				return nil
+			}
 
-				hashstr := common.GetXXHashString(string(bytes))
+			hashstr := common.GetXXHashString(string(bytes))
 
-				if hashstr != fi.Hash {
-					loggo.Error("load_lib hash diff need delete %s %s %s %s", database, fi.Filename, hashstr, fi.Hash)
-					need_del = append(need_del, string(k))
-					return nil
-				}
+			if hashstr != fi.Hash {
+				loggo.Error("load_lib hash diff need delete %s %s %s %s", database, fi.Filename, hashstr, fi.Hash)
+				need_del = append(need_del, string(k))
+				return nil
 			}
 
 			return nil
