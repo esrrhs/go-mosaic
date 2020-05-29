@@ -43,6 +43,7 @@ func main() {
 	checkhash := flag.Bool("checkhash", true, "check database pic hash")
 	maxsize := flag.Int("maxsize", 4, "pic max size in GB")
 	libname := flag.String("libname", "default", "image lib name in database")
+	srcsize := flag.Int("srcsize", 128, "src image auto scale pixel size")
 
 	flag.Parse()
 
@@ -51,10 +52,7 @@ func main() {
 		flag.Usage()
 		return
 	}
-	if *scalealg != "NearestNeighbor" &&
-		*scalealg != "ApproxBiLinear" &&
-		*scalealg != "BiLinear" &&
-		*scalealg != "CatmullRom" {
+	if getScaler(*scalealg) == nil {
 		fmt.Println("scalealg type error")
 		flag.Usage()
 		return
@@ -78,7 +76,7 @@ func main() {
 	loggo.Info("target %s", *target)
 	loggo.Info("lib %s", *lib)
 
-	err, srcimg, cachemap := parse_src(*src)
+	err, srcimg, cachemap := parse_src(*src, *scalealg, *srcsize)
 	if err != nil {
 		return
 	}
@@ -98,7 +96,7 @@ type CacheInfo struct {
 	lock sync.Mutex
 }
 
-func parse_src(src string) (error, image.Image, *sync.Map) {
+func parse_src(src string, scalealg string, srcsize int) (error, image.Image, *sync.Map) {
 	loggo.Info("parse_src %s", src)
 
 	reader, err := os.Open(src)
@@ -119,6 +117,20 @@ func parse_src(src string) (error, image.Image, *sync.Map) {
 	if err != nil {
 		loggo.Error("parse_src Decode image fail %s %s", src, err)
 		return err, nil, nil
+	}
+
+	scale := getScaler(scalealg)
+
+	lenx := img.Bounds().Dx()
+	leny := img.Bounds().Dy()
+	len := common.MaxOfInt(lenx, leny)
+	if len > srcsize {
+		newlenx := lenx * srcsize / len
+		newleny := leny * srcsize / len
+		rect := image.Rectangle{image.Point{0, 0}, image.Point{newlenx, newleny}}
+		dst := image.NewRGBA(rect)
+		scale.Scale(dst, rect, img, img.Bounds(), draw.Over, nil)
+		img = dst
 	}
 
 	bounds := img.Bounds()
@@ -173,8 +185,22 @@ func parse_src(src string) (error, image.Image, *sync.Map) {
 		})
 	}
 
-	loggo.Info("parse_src ok %s %d", src, filesize)
+	loggo.Info("parse_src ok %s %d %d*%d", src, filesize, img.Bounds().Dx(), img.Bounds().Dy())
 	return nil, img, &cachemap
+}
+
+func getScaler(scalealg string) draw.Scaler {
+	var scale draw.Scaler
+	if scalealg == "NearestNeighbor" {
+		scale = draw.NearestNeighbor
+	} else if scalealg == "ApproxBiLinear" {
+		scale = draw.ApproxBiLinear
+	} else if scalealg == "BiLinear" {
+		scale = draw.BiLinear
+	} else if scalealg == "CatmullRom" {
+		scale = draw.CatmullRom
+	}
+	return scale
 }
 
 type FileInfo struct {
@@ -410,16 +436,7 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 	var save_inter int
 	go save_to_database(&worker, &imagefilelist, db, &save_inter, bucket_name)
 
-	var scale draw.Scaler
-	if scalealg == "NearestNeighbor" {
-		scale = draw.NearestNeighbor
-	} else if scalealg == "ApproxBiLinear" {
-		scale = draw.ApproxBiLinear
-	} else if scalealg == "BiLinear" {
-		scale = draw.BiLinear
-	} else if scalealg == "CatmullRom" {
-		scale = draw.CatmullRom
-	}
+	scale := getScaler(scalealg)
 
 	tp := threadpool.NewThreadPool(workernum, 16, func(in interface{}) {
 		i := in.(int)
@@ -901,16 +918,7 @@ func gen_target_pixel(src color.RGBA, x int, y int, dst *image.RGBA, db *bolt.DB
 					return
 				}
 
-				var scale draw.Scaler
-				if scalealg == "NearestNeighbor" {
-					scale = draw.NearestNeighbor
-				} else if scalealg == "ApproxBiLinear" {
-					scale = draw.ApproxBiLinear
-				} else if scalealg == "BiLinear" {
-					scale = draw.BiLinear
-				} else if scalealg == "CatmullRom" {
-					scale = draw.CatmullRom
-				}
+				scale := getScaler(scalealg)
 
 				minimg, err = calc_img(minimg, mindiffname, scale, pixelsize)
 				if err != nil {
