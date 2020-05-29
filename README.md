@@ -42,6 +42,6 @@ Usage of D:\project\go-mosaic\test.exe:
 
 # 示例
 ![image](input.png)
-![image](output.png)
+![image](smalloutput.png)
 
 
