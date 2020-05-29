@@ -15,21 +15,25 @@ go-mosaic.exe -src input.jpg -target output.jpg -lib ./pic
 ```
 * 更多参数，参考help
 ```
-Usage of D:\project\go-mosaic\aa.exe:
+Usage of D:\project\go-mosaic\test.exe:
   -checkhash
     	check database pic hash (default true)
   -database string
     	cache datbase (default "./database.bin")
   -lib string
-    	lib image path
+    	image lib path
+  -libname string
+    	image lib name in database (default "default")
   -maxsize int
     	pic max size in GB (default 4)
   -pixelsize int
-    	pic scale size per one pixel (default 256)
+    	pic scale size per one pixel (default 64)
   -scalealg string
     	pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom (default "CatmullRom")
   -src string
     	src image path
+  -srcsize int
+    	src image auto scale pixel size (default 128)
   -target string
     	target image path
   -worker int
