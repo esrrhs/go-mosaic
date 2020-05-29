@@ -11,7 +11,7 @@ go-mosaic是一个制作相片马赛克的工具。
 * 准备好一张目标图片，用来生成在最终的大图，假设为input.jpg，生成的大图为output.jpg
 * 输入命令，等待完成
 ```
-go-mosaic.exe -src input.jpg -target output.jpg -lib ./pic
+go-mosaic.exe -src input.png -target output.jpg -lib ./test
 ```
 * 更多参数，参考help
 ```
