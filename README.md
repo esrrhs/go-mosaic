@@ -7,8 +7,8 @@ go-mosaic是一个制作相片马赛克的工具。
 * 多核构建，加载、计算、替换均为并发
 
 # 使用
-* git clone
-* 输入命令，等待完成
+* 克隆项目，编译，或者下载release
+* 执行命令，等待完成
 ```
 go-mosaic.exe -src input.png -target output.jpg -lib ./test
 ```
