@@ -19,7 +19,6 @@ import (
 	"image/png"
 	_ "image/png"
 	"io/ioutil"
-	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -36,14 +35,14 @@ func main() {
 
 	src := flag.String("src", "", "src image path")
 	target := flag.String("target", "", "target image path")
-	lib := flag.String("lib", "", "lib image path")
+	lib := flag.String("lib", "", "image lib path")
 	worker := flag.Int("worker", 12, "worker thread num")
 	database := flag.String("database", "./database.bin", "cache datbase")
-	pixelsize := flag.Int("pixelsize", 256, "pic scale size per one pixel")
+	pixelsize := flag.Int("pixelsize", 64, "pic scale size per one pixel")
 	scalealg := flag.String("scalealg", "CatmullRom", "pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom")
 	checkhash := flag.Bool("checkhash", true, "check database pic hash")
 	maxsize := flag.Int("maxsize", 4, "pic max size in GB")
-	libname := flag.String("libname", "", "lib name")
+	libname := flag.String("libname", "default", "image lib name in database")
 
 	flag.Parse()
 
@@ -79,7 +78,7 @@ func main() {
 	loggo.Info("target %s", *target)
 	loggo.Info("lib %s", *lib)
 
-	err, srcimg := parse_src(*src)
+	err, srcimg, cachemap := parse_src(*src)
 	if err != nil {
 		return
 	}
@@ -87,37 +86,95 @@ func main() {
 	if err != nil {
 		return
 	}
-	err = gen_target(srcimg, *target, *worker, *database, *pixelsize, *maxsize, *scalealg, *libname)
+	err = gen_target(srcimg, *target, *worker, *database, *pixelsize, *maxsize, *scalealg, *libname, cachemap)
 	if err != nil {
 		return
 	}
 }
 
-func parse_src(src string) (error, image.Image) {
+type CacheInfo struct {
+	num  int
+	img  []image.Image
+	lock sync.Mutex
+}
+
+func parse_src(src string) (error, image.Image, *sync.Map) {
 	loggo.Info("parse_src %s", src)
 
 	reader, err := os.Open(src)
 	if err != nil {
 		loggo.Error("parse_src Open fail %s %s", src, err)
-		return err, nil
+		return err, nil, nil
 	}
 	defer reader.Close()
 
 	fi, err := reader.Stat()
 	if err != nil {
 		loggo.Error("parse_src Stat fail %s %s", src, err)
-		return err, nil
+		return err, nil, nil
 	}
 	filesize := fi.Size()
 
 	img, _, err := image.Decode(reader)
 	if err != nil {
 		loggo.Error("parse_src Decode image fail %s %s", src, err)
-		return err, nil
+		return err, nil, nil
+	}
+
+	bounds := img.Bounds()
+
+	startx := bounds.Min.X
+	starty := bounds.Min.Y
+	endx := bounds.Max.X
+	endy := bounds.Max.Y
+
+	pixelnum := make(map[string]int)
+	for y := starty; y < endy; y++ {
+		for x := startx; x < endx; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			r, g, b = r>>8, g>>8, b>>8
+
+			pixelnum[make_string(uint8(r), uint8(g), uint8(b))]++
+		}
+	}
+
+	var cachemap sync.Map
+	top := 0
+	num := 0
+	for {
+		maxpixel := ""
+		maxpixelnum := 0
+		for k, v := range pixelnum {
+			if v > maxpixelnum {
+				maxpixelnum = v
+				maxpixel = k
+			}
+		}
+		if maxpixelnum >= 16 {
+			cachemap.Store(maxpixel, &CacheInfo{num: maxpixelnum})
+			num++
+		} else {
+			break
+		}
+		if maxpixelnum > top {
+			top = maxpixelnum
+		}
+		pixelnum[maxpixel] = 0
+	}
+
+	loggo.Info("parse_src cache top pixel num=%d max=%d", num, top)
+	for i := 2; i <= top; i++ {
+		cachemap.Range(func(key, value interface{}) bool {
+			ci := value.(*CacheInfo)
+			if ci.num == i {
+				loggo.Info("parse_src cache top pixel [%s]=%d", key, i)
+			}
+			return true
+		})
 	}
 
 	loggo.Info("parse_src ok %s %d", src, filesize)
-	return nil, img
+	return nil, img, &cachemap
 }
 
 type FileInfo struct {
@@ -177,8 +234,12 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 	bucket_name := "FileInfo" + libname + strconv.Itoa(pixelsize)
 
 	dbtotal := 0
-	db.View(func(tx *bolt.Tx) error {
-		tx.CreateBucketIfNotExists([]byte(bucket_name))
+	db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(bucket_name))
+		if err != nil {
+			loggo.Error("load_lib Open database CreateBucketIfNotExists fail %s %s %s", database, bucket_name, err)
+			os.Exit(1)
+		}
 		b := tx.Bucket([]byte(bucket_name))
 		b.ForEach(func(k, v []byte) error {
 			dbtotal++
@@ -660,7 +721,7 @@ func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, 
 	}
 }
 
-func gen_target(srcimg image.Image, target string, workernum int, database string, pixelsize int, maxsize int, scalealg string, libname string) error {
+func gen_target(srcimg image.Image, target string, workernum int, database string, pixelsize int, maxsize int, scalealg string, libname string, cachemap *sync.Map) error {
 	loggo.Info("gen_target %s", target)
 
 	db, err := bolt.Open(database, 0600, nil)
@@ -684,6 +745,7 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 	total := bounds.Dx() * bounds.Dy()
 	var done int32
 	var doing int32
+	var cached int32
 
 	lenx := bounds.Dx() * pixelsize
 	leny := bounds.Dy() * pixelsize
@@ -708,7 +770,7 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 		defer atomic.AddInt32(&done, 1)
 		defer atomic.AddInt32(&doing, -1)
 		gi := in.(GenInfo)
-		gen_target_pixel(gi.c, gi.x, gi.y, dst, db, bucket_name, pixelsize, scalealg)
+		gen_target_pixel(gi.c, gi.x, gi.y, dst, db, bucket_name, pixelsize, scalealg, cachemap, &cached)
 	})
 
 	for y := starty; y < endy; y++ {
@@ -731,8 +793,8 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 				if speed > 0 {
 					left = time.Duration(int64((total-int(done))/speed) * int64(time.Second)).String()
 				}
-				loggo.Info("gen speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d", speed, int(done)*100/total,
-					left, int(doing), int(done), total)
+				loggo.Info("gen speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d cached=%d cached-percent=%d%%", speed, int(done)*100/total,
+					left, int(doing), int(done), total, cached, int(cached)*100/total)
 			}
 		}
 	}
@@ -748,7 +810,8 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 	loggo.Info("gen_target start write file %s", target)
 	dstFile, err := os.Create(target)
 	if err != nil {
-		log.Fatal(err)
+		loggo.Error("gen_target Create fail %s %s", target, err)
+		return err
 	}
 	defer dstFile.Close()
 
@@ -767,65 +830,125 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 	return nil
 }
 
-func gen_target_pixel(src color.RGBA, x int, y int, dst *image.RGBA, db *bolt.DB, bucket_name string, pixelsize int, scalealg string) {
+func gen_target_pixel(src color.RGBA, x int, y int, dst *image.RGBA, db *bolt.DB, bucket_name string, pixelsize int, scalealg string, cachemap *sync.Map, cached *int32) {
 
-	mindiff := math.MaxFloat64
-	var mindiffname string
-	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(bucket_name))
-		b.ForEach(func(k, v []byte) error {
+	var minimgs []image.Image
 
-			var b bytes.Buffer
-			b.Write(v)
+	key := make_string(src.R, src.G, src.B)
+	v, ok := cachemap.Load(key)
+	if ok {
+		ci := v.(*CacheInfo)
+		minimgs = ci.img
+	}
 
-			dec := gob.NewDecoder(&b)
-			var fi FileInfo
-			err := dec.Decode(&fi)
-			if err != nil {
-				loggo.Error("gen_target_pixel database Decode fail %s %s", string(k), err)
+	if len(minimgs) <= 0 {
+		if ok {
+			ci := v.(*CacheInfo)
+			ci.lock.Lock()
+		}
+
+		if len(minimgs) <= 0 {
+
+			mindiff := math.MaxFloat64
+			var mindiffnames []string
+			var minfi FileInfo
+
+			db.View(func(tx *bolt.Tx) error {
+				b := tx.Bucket([]byte(bucket_name))
+				b.ForEach(func(k, v []byte) error {
+
+					var b bytes.Buffer
+					b.Write(v)
+
+					dec := gob.NewDecoder(&b)
+					var fi FileInfo
+					err := dec.Decode(&fi)
+					if err != nil {
+						loggo.Error("gen_target_pixel database Decode fail %s %s", string(k), err)
+						os.Exit(1)
+					}
+
+					if minfi.R == fi.R && minfi.G == fi.G && minfi.B == fi.B {
+						mindiffnames = append(mindiffnames, fi.Filename)
+						return nil
+					}
+
+					tmp := color.RGBA{fi.R, fi.G, fi.B, 0}
+					diff := common.ColorDistance(src, tmp)
+					if diff < mindiff {
+						mindiff = diff
+						mindiffnames = mindiffnames[:0]
+						mindiffnames = append(mindiffnames, fi.Filename)
+						minfi = fi
+					}
+
+					return nil
+				})
 				return nil
+			})
+
+			for _, mindiffname := range mindiffnames {
+				reader, err := os.Open(mindiffname)
+				if err != nil {
+					loggo.Error("gen_target_pixel Open fail %s %s", mindiffname, err)
+					os.Exit(1)
+				}
+				defer reader.Close()
+
+				minimg, _, err := image.Decode(reader)
+				if err != nil {
+					loggo.Error("gen_target_pixel Decode fail %s %s", mindiffname, err)
+					return
+				}
+
+				var scale draw.Scaler
+				if scalealg == "NearestNeighbor" {
+					scale = draw.NearestNeighbor
+				} else if scalealg == "ApproxBiLinear" {
+					scale = draw.ApproxBiLinear
+				} else if scalealg == "BiLinear" {
+					scale = draw.BiLinear
+				} else if scalealg == "CatmullRom" {
+					scale = draw.CatmullRom
+				}
+
+				minimg, err = calc_img(minimg, mindiffname, scale, pixelsize)
+				if err != nil {
+					loggo.Error("gen_target_pixel calc_img image fail %s %s", mindiffname, err)
+					return
+				}
+
+				minimgs = append(minimgs, minimg)
 			}
 
-			tmp := color.RGBA{fi.R, fi.G, fi.B, 0}
-			diff := common.ColorDistance(src, tmp)
-			if diff < mindiff {
-				mindiff = diff
-				mindiffname = fi.Filename
+			v, ok := cachemap.Load(key)
+			if ok {
+				ci := v.(*CacheInfo)
+				ci.img = minimgs
 			}
+		} else {
+			atomic.AddInt32(cached, 1)
+		}
 
-			return nil
-		})
-		return nil
-	})
-
-	reader, err := os.Open(mindiffname)
-	if err != nil {
-		loggo.Error("gen_target_pixel Open fail %s %s", mindiffname, err)
-		return
-	}
-	defer reader.Close()
-
-	minimg, _, err := image.Decode(reader)
-	if err != nil {
-		loggo.Error("gen_target_pixel Decode fail %s %s", mindiffname, err)
-		return
+		if ok {
+			ci := v.(*CacheInfo)
+			ci.lock.Unlock()
+		}
+	} else {
+		atomic.AddInt32(cached, 1)
 	}
 
-	var scale draw.Scaler
-	if scalealg == "NearestNeighbor" {
-		scale = draw.NearestNeighbor
-	} else if scalealg == "ApproxBiLinear" {
-		scale = draw.ApproxBiLinear
-	} else if scalealg == "BiLinear" {
-		scale = draw.BiLinear
-	} else if scalealg == "CatmullRom" {
-		scale = draw.CatmullRom
-	}
+	var minimg image.Image
+	minimg = minimgs[common.RandInt31n(len(minimgs))]
 
-	minimg, err = calc_img(minimg, mindiffname, scale, pixelsize)
-	if err != nil {
-		loggo.Error("gen_target_pixel calc_img image fail %s %s", mindiffname, err)
-		return
+	if common.RandInt()%2 == 0 {
+		flippedImg := image.NewRGBA(minimg.Bounds())
+		for j := 0; j < minimg.Bounds().Dy(); j++ {
+			for i := 0; i < minimg.Bounds().Dx(); i++ {
+				flippedImg.Set((minimg.Bounds().Dx()-1)-i, j, minimg.At(i, j))
+			}
+		}
+		minimg = flippedImg
 	}
 
 	draw.Copy(dst, image.Point{x * pixelsize, y * pixelsize}, minimg, minimg.Bounds(), draw.Over, nil)
