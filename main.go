@@ -43,6 +43,7 @@ func main() {
 	scalealg := flag.String("scalealg", "CatmullRom", "pic scale function NearestNeighbor/ApproxBiLinear/BiLinear/CatmullRom")
 	checkhash := flag.Bool("checkhash", true, "check database pic hash")
 	maxsize := flag.Int("maxsize", 4, "pic max size in GB")
+	libname := flag.String("libname", "", "lib name")
 
 	flag.Parse()
 
@@ -82,11 +83,11 @@ func main() {
 	if err != nil {
 		return
 	}
-	err = load_lib(*lib, *worker, *database, *pixelsize, *scalealg, *checkhash)
+	err = load_lib(*lib, *worker, *database, *pixelsize, *scalealg, *checkhash, *libname)
 	if err != nil {
 		return
 	}
-	err = gen_target(srcimg, *target, *worker, *database, *pixelsize, *maxsize)
+	err = gen_target(srcimg, *target, *worker, *database, *pixelsize, *maxsize, *scalealg, *libname)
 	if err != nil {
 		return
 	}
@@ -140,7 +141,7 @@ type ColorData struct {
 	b    uint8
 }
 
-func load_lib(lib string, workernum int, database string, pixelsize int, scalealg string, checkhash bool) error {
+func load_lib(lib string, workernum int, database string, pixelsize int, scalealg string, checkhash bool, libname string) error {
 	loggo.Info("load_lib %s", lib)
 
 	loggo.Info("load_lib start ini database")
@@ -173,7 +174,7 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 	}
 	defer db.Close()
 
-	bucket_name := "FileInfo" + strconv.Itoa(pixelsize)
+	bucket_name := "FileInfo" + libname + strconv.Itoa(pixelsize)
 
 	dbtotal := 0
 	db.View(func(tx *bolt.Tx) error {
@@ -506,6 +507,44 @@ func make_string(r uint8, g uint8, b uint8) string {
 	return "r " + strconv.Itoa(int(r)) + " g " + strconv.Itoa(int(g)) + " b " + strconv.Itoa(int(b))
 }
 
+func calc_img(src image.Image, filename string, scaler draw.Scaler, pixelsize int) (image.Image, error) {
+
+	bounds := src.Bounds()
+
+	len := common.MinOfInt(bounds.Dx(), bounds.Dy())
+	startx := bounds.Min.X + (bounds.Dx()-len)/2
+	starty := bounds.Min.Y + (bounds.Dy()-len)/2
+	endx := common.MinOfInt(startx+len, bounds.Max.X)
+	endy := common.MinOfInt(starty+len, bounds.Max.Y)
+
+	if startx != bounds.Min.X || starty != bounds.Min.Y || endx != bounds.Max.X || endy != bounds.Max.Y {
+		dst := image.NewRGBA(image.Rectangle{image.Point{0, 0}, image.Point{len, len}})
+		draw.Copy(dst, image.Point{0, 0}, src, image.Rectangle{image.Point{startx, starty}, image.Point{endx, endy}}, draw.Over, nil)
+		src = dst
+	}
+
+	bounds = src.Bounds()
+	if bounds.Dx() != bounds.Dy() {
+		loggo.Error("calc_img cult image fail %s %d %d", filename, bounds.Dx(), bounds.Dy())
+		return nil, errors.New("bounds error")
+	}
+
+	len = common.MinOfInt(bounds.Dx(), bounds.Dy())
+	if len < pixelsize {
+		loggo.Error("calc_img image too small %s %d %d", filename, len, pixelsize)
+		return nil, errors.New("too small")
+	}
+
+	if len > pixelsize {
+		rect := image.Rectangle{image.Point{0, 0}, image.Point{pixelsize, pixelsize}}
+		dst := image.NewRGBA(rect)
+		scaler.Scale(dst, rect, src, src.Bounds(), draw.Over, nil)
+		src = dst
+	}
+
+	return src, nil
+}
+
 func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int64, scaler draw.Scaler, pixelsize int) {
 	defer common.CrashLog()
 	defer atomic.AddInt32(worker, -1)
@@ -535,40 +574,13 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int6
 		return
 	}
 
+	img, err = calc_img(img, cfi.fi.Filename, scaler, pixelsize)
+	if err != nil {
+		loggo.Error("calc_avg_color calc_img image fail %s %s", cfi.fi.Filename, err)
+		return
+	}
+
 	bounds := img.Bounds()
-
-	len := common.MinOfInt(bounds.Dx(), bounds.Dy())
-	startx := bounds.Min.X + (bounds.Dx()-len)/2
-	starty := bounds.Min.Y + (bounds.Dy()-len)/2
-	endx := common.MinOfInt(startx+len, bounds.Max.X)
-	endy := common.MinOfInt(starty+len, bounds.Max.Y)
-
-	if startx != bounds.Min.X || starty != bounds.Min.Y || endx != bounds.Max.X || endy != bounds.Max.Y {
-		dst := image.NewRGBA(image.Rectangle{image.Point{0, 0}, image.Point{len, len}})
-		draw.Copy(dst, image.Point{0, 0}, img, image.Rectangle{image.Point{startx, starty}, image.Point{endx, endy}}, draw.Over, nil)
-		img = dst
-	}
-
-	bounds = img.Bounds()
-	if bounds.Dx() != bounds.Dy() {
-		loggo.Error("calc_avg_color cult image fail %s %d %d", cfi.fi.Filename, bounds.Dx(), bounds.Dy())
-		return
-	}
-
-	len = common.MinOfInt(bounds.Dx(), bounds.Dy())
-	if len < pixelsize {
-		loggo.Error("calc_avg_color image too small %s %d %d", cfi.fi.Filename, len, pixelsize)
-		return
-	}
-
-	if len > pixelsize {
-		rect := image.Rectangle{image.Point{0, 0}, image.Point{pixelsize, pixelsize}}
-		dst := image.NewRGBA(rect)
-		scaler.Scale(dst, rect, img, img.Bounds(), draw.Over, nil)
-		img = dst
-	}
-
-	bounds = img.Bounds()
 
 	var sumR, sumG, sumB, count float64
 
@@ -594,7 +606,7 @@ func calc_avg_color(cfi *CalFileInfo, worker *int32, done *int32, donesize *int6
 
 	b, err := ioutil.ReadAll(readerhash)
 	if err != nil {
-		loggo.Error("calc_avg_color ReadAll fail %s %d %d", cfi.fi.Filename, len, pixelsize)
+		loggo.Error("calc_avg_color ReadAll fail %s %d", cfi.fi.Filename, pixelsize)
 		return
 	}
 
@@ -648,7 +660,7 @@ func save_to_database(worker *int32, imagefilelist *[]CalFileInfo, db *bolt.DB, 
 	}
 }
 
-func gen_target(srcimg image.Image, target string, workernum int, database string, pixelsize int, maxsize int) error {
+func gen_target(srcimg image.Image, target string, workernum int, database string, pixelsize int, maxsize int, scalealg string, libname string) error {
 	loggo.Info("gen_target %s", target)
 
 	db, err := bolt.Open(database, 0600, nil)
@@ -658,7 +670,7 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 	}
 	defer db.Close()
 
-	bucket_name := "FileInfo" + strconv.Itoa(pixelsize)
+	bucket_name := "FileInfo" + libname + strconv.Itoa(pixelsize)
 
 	bounds := srcimg.Bounds()
 
@@ -696,7 +708,7 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 		defer atomic.AddInt32(&done, 1)
 		defer atomic.AddInt32(&doing, -1)
 		gi := in.(GenInfo)
-		gen_target_pixel(gi.c, gi.x, gi.y, dst, db, bucket_name, pixelsize)
+		gen_target_pixel(gi.c, gi.x, gi.y, dst, db, bucket_name, pixelsize, scalealg)
 	})
 
 	for y := starty; y < endy; y++ {
@@ -755,7 +767,7 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 	return nil
 }
 
-func gen_target_pixel(src color.RGBA, x int, y int, dst *image.RGBA, db *bolt.DB, bucket_name string, pixelsize int) {
+func gen_target_pixel(src color.RGBA, x int, y int, dst *image.RGBA, db *bolt.DB, bucket_name string, pixelsize int, scalealg string) {
 
 	mindiff := math.MaxFloat64
 	var mindiffname string
@@ -796,6 +808,23 @@ func gen_target_pixel(src color.RGBA, x int, y int, dst *image.RGBA, db *bolt.DB
 	minimg, _, err := image.Decode(reader)
 	if err != nil {
 		loggo.Error("gen_target_pixel Decode fail %s %s", mindiffname, err)
+		return
+	}
+
+	var scale draw.Scaler
+	if scalealg == "NearestNeighbor" {
+		scale = draw.NearestNeighbor
+	} else if scalealg == "ApproxBiLinear" {
+		scale = draw.ApproxBiLinear
+	} else if scalealg == "BiLinear" {
+		scale = draw.BiLinear
+	} else if scalealg == "CatmullRom" {
+		scale = draw.CatmullRom
+	}
+
+	minimg, err = calc_img(minimg, mindiffname, scale, pixelsize)
+	if err != nil {
+		loggo.Error("gen_target_pixel calc_img image fail %s %s", mindiffname, err)
 		return
 	}
 
