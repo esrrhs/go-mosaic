@@ -12,8 +12,7 @@ go-mosaic是一个制作相片马赛克的工具。
 ```
 go-mosaic.exe -src input.png -target output.jpg -lib ./test
 ```
-* 其中./test为图片文件夹，用来组成最终图片的元素。input.png为目标图片，用来生成最终的大图output.jpg
-* 素材图片越多，生成越精确
+* 其中./test为图片文件夹，用来组成最终图片的元素。input.png为目标图片，用来生成最终的大图output.jpg。素材图片越多，生成越精确
 * 更多参数，参考help
 ```
 Usage of D:\project\go-mosaic\test.exe:
