@@ -2,7 +2,7 @@
 go-mosaic is a tool for making photo mosaics. Photo mosaics, or montage photos, montage collages, are an art technique of image processing. Pictures made in this way are composed of many small photos when viewed close, but when viewed from a distance, each photo Through the fine-tuning of light and shadow and color, the basic pixels of a large picture are called the photo mosaic technique
 
 # Features
-* Designed for massive pictures, can support tens of thousands of pictures
+* Designed for massive pictures, can support millions of pictures
 * Built-in cache database, pictures are deleted and changed automatically from cache
 * Multi-core construction, loading, calculation and replacement are all concurrent
 
