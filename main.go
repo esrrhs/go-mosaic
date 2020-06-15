@@ -358,14 +358,14 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 
 			if time.Now().Sub(lastload) >= time.Second {
 				lastload = time.Now()
-				speed := int(doneload) / (int(time.Now().Sub(beginload)) / int(time.Second))
+				speed := float64(doneload) / float64(int(time.Now().Sub(beginload))/int(time.Second))
 				left := ""
 				if speed > 0 {
-					left = time.Duration(int64((dbtotal-int(doneload))/speed) * int64(time.Second)).String()
+					left = time.Duration(int64(float64(dbtotal-int(doneload))/speed) * int64(time.Second)).String()
 				}
 				donesizem := doneloadsize / 1024 / 1024
 				dataspeed := int(donesizem) / (int(time.Now().Sub(beginload)) / int(time.Second))
-				loggo.Info("load speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d data=%dM dataspeed=%dM/s", speed, int(doneload)*100/dbtotal, left,
+				loggo.Info("load speed=%.2f/s percent=%d%% time=%s thead=%d progress=%d/%d data=%dM dataspeed=%dM/s", speed, int(doneload)*100/dbtotal, left,
 					loading, doneload, dbtotal, donesizem, dataspeed)
 			}
 
@@ -456,14 +456,14 @@ func load_lib(lib string, workernum int, database string, pixelsize int, scaleal
 		}
 		if time.Now().Sub(last) >= time.Second {
 			last = time.Now()
-			speed := int(done) / (int(time.Now().Sub(begin)) / int(time.Second))
+			speed := float64(done) / float64(int(time.Now().Sub(begin))/int(time.Second))
 			left := ""
 			if speed > 0 {
-				left = time.Duration(int64((len(imagefilelist)-int(done))/speed) * int64(time.Second)).String()
+				left = time.Duration(int64(float64(len(imagefilelist)-int(done))/speed) * int64(time.Second)).String()
 			}
 			donesizem := donesize / 1024 / 1024
 			dataspeed := int(donesizem) / (int(time.Now().Sub(begin)) / int(time.Second))
-			loggo.Info("calc speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d saved=%d data=%dM dataspeed=%dM/s", speed, int(done)*100/len(imagefilelist),
+			loggo.Info("calc speed=%.2f/s percent=%d%% time=%s thead=%d progress=%d/%d saved=%d data=%dM dataspeed=%dM/s", speed, int(done)*100/len(imagefilelist),
 				left, int(worker), int(done), len(imagefilelist), save_inter, donesizem, dataspeed)
 		}
 	}
@@ -805,12 +805,12 @@ func gen_target(srcimg image.Image, target string, workernum int, database strin
 
 			if time.Now().Sub(last) >= time.Second {
 				last = time.Now()
-				speed := int(done) / (int(time.Now().Sub(begin)) / int(time.Second))
+				speed := float64(done) / float64(int(time.Now().Sub(begin))/int(time.Second))
 				left := ""
 				if speed > 0 {
-					left = time.Duration(int64((total-int(done))/speed) * int64(time.Second)).String()
+					left = time.Duration(int64(float64(total-int(done))/speed) * int64(time.Second)).String()
 				}
-				loggo.Info("gen speed=%d/s percent=%d%% time=%s thead=%d progress=%d/%d cached=%d cached-percent=%d%%", speed, int(done)*100/total,
+				loggo.Info("gen speed=%.2f/s percent=%d%% time=%s thead=%d progress=%d/%d cached=%d cached-percent=%d%%", speed, int(done)*100/total,
 					left, int(doing), int(done), total, cached, int(cached)*100/total)
 			}
 		}
