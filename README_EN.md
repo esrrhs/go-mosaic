@@ -1,4 +1,13 @@
 # go-mosaic
+
+[<img src="https://img.shields.io/github/license/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic)
+[<img src="https://img.shields.io/github/languages/top/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic)
+[![Go Report Card](https://goreportcard.com/badge/github.com/esrrhs/go-mosaic)](https://goreportcard.com/report/github.com/esrrhs/go-mosaic)
+[<img src="https://img.shields.io/github/v/release/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic/releases)
+[<img src="https://img.shields.io/github/downloads/esrrhs/go-mosaic/total">](https://github.com/esrrhs/go-mosaic/releases)
+[<img src="https://img.shields.io/docker/pulls/esrrhs/go-mosaic">](https://hub.docker.com/repository/docker/esrrhs/go-mosaic)
+[<img src="https://img.shields.io/github/workflow/status/esrrhs/go-mosaic/Go">](https://github.com/esrrhs/go-mosaic/actions)
+
 go-mosaic is a tool for making photo mosaics. Photo mosaics, or montage photos, montage collages, are an art technique of image processing. Pictures made in this way are composed of many small photos when viewed close, but when viewed from a distance, each photo Through the fine-tuning of light and shadow and color, the basic pixels of a large picture are called the photo mosaic technique
 
 # Features

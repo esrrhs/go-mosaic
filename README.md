@@ -1,4 +1,13 @@
 # go-mosaic
+
+[<img src="https://img.shields.io/github/license/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic)
+[<img src="https://img.shields.io/github/languages/top/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic)
+[![Go Report Card](https://goreportcard.com/badge/github.com/esrrhs/go-mosaic)](https://goreportcard.com/report/github.com/esrrhs/go-mosaic)
+[<img src="https://img.shields.io/github/v/release/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic/releases)
+[<img src="https://img.shields.io/github/downloads/esrrhs/go-mosaic/total">](https://github.com/esrrhs/go-mosaic/releases)
+[<img src="https://img.shields.io/docker/pulls/esrrhs/go-mosaic">](https://hub.docker.com/repository/docker/esrrhs/go-mosaic)
+[<img src="https://img.shields.io/github/workflow/status/esrrhs/go-mosaic/Go">](https://github.com/esrrhs/go-mosaic/actions)
+
 go-mosaic是一个制作相片马赛克的工具。相片馬賽克，或稱蒙太奇照片、蒙太奇拼貼，是一種影像處理的藝術技巧，利用這個方式做出來的圖片，近看時是由許多張小照片合在一起的，但遠看時，每張照片透過光影和色彩的微調，組成了一張大圖的基本像素，就叫做相片馬賽克技巧
 
 [README_EN](./README_EN.md)
