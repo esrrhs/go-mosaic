@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/boltdb/bolt v1.3.1
 	github.com/esrrhs/gohome v0.0.0-20230318054539-1132b09f7684
-	golang.org/x/image v0.6.0
+	golang.org/x/image v0.10.0
 )
 
 require (
