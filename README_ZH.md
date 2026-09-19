@@ -2,60 +2,59 @@
 
 [<img src="https://img.shields.io/github/license/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic)
 [<img src="https://img.shields.io/github/languages/top/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic)
-[![Go Report Card](https://goreportcard.com/badge/github.com/esrrhs/go-mosaic)](https://goreportcard.com/report/github.com/esrrhs/go-mosaic)
 [<img src="https://img.shields.io/github/v/release/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic/releases)
 [<img src="https://img.shields.io/github/downloads/esrrhs/go-mosaic/total">](https://github.com/esrrhs/go-mosaic/releases)
 [<img src="https://img.shields.io/docker/pulls/esrrhs/go-mosaic">](https://hub.docker.com/repository/docker/esrrhs/go-mosaic)
 [<img src="https://img.shields.io/github/actions/workflow/status/esrrhs/go-mosaic/go.yml?branch=master">](https://github.com/esrrhs/go-mosaic/actions)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/esrrhs/go-mosaic)](https://golang.org)
 
-go-mosaic is a tool for making photo mosaics (montage collages). Photo mosaics are an art technique where pictures are composed of many small micro-photos when viewed close up, but resemble a unified larger image when viewed from a distance.
+go-mosaic 是一个高效制作相片马赛克（蒙太奇拼贴照片）的命令行工具。利用图像处理算法，将海量素材小图通过颜色匹配与几何缩放，拼贴成一张宏观与细节兼备的艺术马赛克大图。
 
-[中文文档](./README.md)
+[English](./README.md)
 
-## Features
+## 特性
 
-* **High Performance Concurrency**: Concurrent multi-worker design for loading, resizing, and pixel mapping across multi-core CPUs.
-* **Modern Embedded Database**: Powered by `bbolt` embedded key-value storage with caching, change detection, and hash validation.
-* **Modern Go Tooling**: Written for Go 1.22+, completely race-condition free (verified with `go test -race`), with unit and integration test coverage.
-* **Multi-Platform Support**: Ready for Linux, macOS (including Apple Silicon M-series), Windows, and FreeBSD, along with a minimal multi-stage Docker image.
+* **高性能与高并发**：使用多协程并发计算与图片缩放，全面支持多核 CPU。
+* **内建嵌入式缓存**：采用现代化 bbolt 存储图片特征色彩与哈希，支持断点恢复；库中图片增删自动感知与缓存同步。
+* **现代化 Go 技术栈**：基于 Go 1.22+，全并发无竞态安全（通过 `-race` 检查），提供标准单元测试与端到端集成测试。
+* **多平台支持**：提供 Linux、macOS（含 Apple Silicon M系列）、Windows 等全平台交叉编译与 Docker 容器化支持。
 
-## Quick Start
+## 快速上手
 
-### 1. Build or Download
+### 1. 编译或下载
 
-* Download the pre-built binary for your platform from [GitHub Releases](https://github.com/esrrhs/go-mosaic/releases).
-* Or compile locally using Go:
+* 从 [GitHub Releases](https://github.com/esrrhs/go-mosaic/releases) 下载适合您操作系统的预编译包。
+* 或者直接使用 Go 本地构建：
   ```bash
   git clone https://github.com/esrrhs/go-mosaic.git
   cd go-mosaic
   make build
   ```
 
-### 2. Generate Mosaic
+### 2. 执行拼贴
 
 ```bash
 ./go-mosaic -src input.png -target output.jpg -lib ./test
 ```
 
-* `-src`: Source image to recreate as a mosaic.
-* `-target`: Target output mosaic image path (supports `.png`, `.jpg`, `.jpeg`).
-* `-lib`: Folder containing library images that form individual mosaic tiles.
+* `-src`：目标轮廓图（最终马赛克拼图的主题原图）。
+* `-target`：输出马赛克大图路径（支持 `.png`、`.jpg`、`.jpeg`）。
+* `-lib`：素材图库文件夹（组成马赛克微元的小图库，素材越丰富，拼图色彩与逼真度越高）。
 
-### 3. Docker Usage
+### 3. Docker 使用
 
 ```bash
-# Build Docker image
+# 构建镜像
 docker build -t go-mosaic:latest .
 
-# Run mosaic generator inside container
+# 运行容器生成马赛克
 docker run --rm -v $(pwd):/workspace go-mosaic:latest \
   -src /workspace/input.png \
   -target /workspace/output.png \
   -lib /workspace/test
 ```
 
-## Options
+## 参数说明
 
 ```text
 Usage of go-mosaic:
@@ -83,24 +82,24 @@ Usage of go-mosaic:
     	worker thread num (default 12)
 ```
 
-## Development
+## 开发与测试
 
 ```bash
-# Run tests with race detection
+# 运行单元测试与竞态检测
 make test
 
-# Code static analysis
+# 代码静态检查
 make vet
 
-# Cross-compile release binaries for all platforms
+# 跨平台构建打包
 make pack
 
-# Clean build artifacts
+# 清理构建产物
 make clean
 ```
 
-## Example
+## 效果示例
 
-| Original Target Image | Generated Mosaic Collage |
+| 原始目标图 | 马赛克生成大图 |
 | :---: | :---: |
 | ![input](input.png) | ![output](smalloutput.png) |
