@@ -6,29 +6,63 @@
 [<img src="https://img.shields.io/github/v/release/esrrhs/go-mosaic">](https://github.com/esrrhs/go-mosaic/releases)
 [<img src="https://img.shields.io/github/downloads/esrrhs/go-mosaic/total">](https://github.com/esrrhs/go-mosaic/releases)
 [<img src="https://img.shields.io/docker/pulls/esrrhs/go-mosaic">](https://hub.docker.com/repository/docker/esrrhs/go-mosaic)
-[<img src="https://img.shields.io/github/workflow/status/esrrhs/go-mosaic/Go">](https://github.com/esrrhs/go-mosaic/actions)
+[<img src="https://img.shields.io/github/actions/workflow/status/esrrhs/go-mosaic/go.yml?branch=master">](https://github.com/esrrhs/go-mosaic/actions)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/esrrhs/go-mosaic)](https://golang.org)
 
-go-mosaic is a tool for making photo mosaics. Photo mosaics, or montage photos, montage collages, are an art technique of image processing. Pictures made in this way are composed of many small photos when viewed close, but when viewed from a distance, each photo Through the fine-tuning of light and shadow and color, the basic pixels of a large picture are called the photo mosaic technique
+go-mosaic is a tool for making photo mosaics (montage collages). Photo mosaics are an art technique where pictures are composed of many small micro-photos when viewed close up, but resemble a unified larger image when viewed from a distance.
 
-# Features
-* Designed for massive pictures, can support millions of pictures
-* Built-in cache database, pictures are deleted and changed automatically from cache
-* Multi-core construction, loading, calculation and replacement are all concurrent
+[中文文档](./README.md)
 
-# Use
-* Clone the project, compile, or download [release](https://github.com/esrrhs/go-mosaic/releases)
-* Execute commands and wait for completion
+## Features
+
+* **High Performance Concurrency**: Concurrent multi-worker design for loading, resizing, and pixel mapping across multi-core CPUs.
+* **Modern Embedded Database**: Powered by `bbolt` embedded key-value storage with caching, change detection, and hash validation.
+* **Modern Go Tooling**: Written for Go 1.22+, completely race-condition free (verified with `go test -race`), with unit and integration test coverage.
+* **Multi-Platform Support**: Ready for Linux, macOS (including Apple Silicon M-series), Windows, and FreeBSD, along with a minimal multi-stage Docker image.
+
+## Quick Start
+
+### 1. Build or Download
+
+* Download the pre-built binary for your platform from [GitHub Releases](https://github.com/esrrhs/go-mosaic/releases).
+* Or compile locally using Go:
+  ```bash
+  git clone https://github.com/esrrhs/go-mosaic.git
+  cd go-mosaic
+  make build
+  ```
+
+### 2. Generate Mosaic
+
+```bash
+./go-mosaic -src input.png -target output.jpg -lib ./test
 ```
-go-mosaic.exe -src input.png -target output.jpg -lib ./test
+
+* `-src`: Source image to recreate as a mosaic.
+* `-target`: Target output mosaic image path (supports `.png`, `.jpg`, `.jpeg`).
+* `-lib`: Folder containing library images that form individual mosaic tiles.
+
+### 3. Docker Usage
+
+```bash
+# Build Docker image
+docker build -t go-mosaic:latest .
+
+# Run mosaic generator inside container
+docker run --rm -v $(pwd):/workspace go-mosaic:latest \
+  -src /workspace/input.png \
+  -target /workspace/output.png \
+  -lib /workspace/test
 ```
-* Among them, ./test is the picture folder, which is used to form the elements of the final picture. input.png is the target image, which is used to generate the final large image output.jpg. The more material pictures, the more accurate the generation
-* For more parameters, refer to help
-```
-Usage of D:\project\go-mosaic\test.exe:
+
+## Options
+
+```text
+Usage of go-mosaic:
   -checkhash
     	check database pic hash (default true)
   -database string
-    	cache datbase (default "./database.bin")
+    	cache database (default "./database.bin")
   -lib string
     	image lib path
   -libname string
@@ -49,8 +83,24 @@ Usage of D:\project\go-mosaic\test.exe:
     	worker thread num (default 12)
 ```
 
-# Example
-![image](input.png)
-![image](smalloutput.png)
+## Development
 
+```bash
+# Run tests with race detection
+make test
 
+# Code static analysis
+make vet
+
+# Cross-compile release binaries for all platforms
+make pack
+
+# Clean build artifacts
+make clean
+```
+
+## Example
+
+| Original Target Image | Generated Mosaic Collage |
+| :---: | :---: |
+| ![input](input.png) | ![output](smalloutput.png) |

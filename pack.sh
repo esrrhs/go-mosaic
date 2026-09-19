@@ -1,49 +1,61 @@
-#! /bin/bash
-#set -x
+#!/usr/bin/env bash
+set -euo pipefail
+
 NAME="go-mosaic"
+TARGETS=(
+  "linux/amd64"
+  "linux/arm64"
+  "linux/386"
+  "linux/arm"
+  "darwin/amd64"
+  "darwin/arm64"
+  "windows/amd64"
+  "windows/arm64"
+  "windows/386"
+  "freebsd/amd64"
+)
 
-export GO111MODULE=on
+rm -rf pack pack.zip
+mkdir -p pack
 
-#go tool dist list
-build_list=$(go tool dist list)
+echo "==> Building ${NAME} release binaries..."
 
-rm pack -rf
-rm pack.zip -f
-mkdir pack
+for target in "${TARGETS[@]}"; do
+  os="${target%%/*}"
+  arch="${target##*/}"
+  output_name="${NAME}_${os}_${arch}"
 
-for line in $build_list; do
-  os=$(echo "$line" | awk -F"/" '{print $1}')
-  arch=$(echo "$line" | awk -F"/" '{print $2}')
-  echo "os="$os" arch="$arch" start build"
-  if [ $os == "android" ] || [ $os == "ios" ] || [ $os == "plan9" ] || [ $arch == "ppc64" ] || [ $arch == "wasm" ] || [ $arch == "mips" ] ||
-    [ $arch == "mips64" ] || [ $arch == "mips64le" ] || [ $arch == "mipsle" ] || [ $arch == "riscv64" ]; then
-    continue
+  echo "--> Building ${os}/${arch}..."
+
+  binary_name="${NAME}"
+  if [ "${os}" = "windows" ]; then
+    binary_name="${NAME}.exe"
   fi
-  CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags="-s -w"
-  if [ $? -ne 0 ]; then
-    echo "os="$os" arch="$arch" build fail"
-    exit 1
-  fi
-  if [ $os = "windows" ]; then
-    zip ${NAME}_"${os}"_"${arch}"".zip" $NAME".exe"
-    if [ $? -ne 0 ]; then
-      echo "os="$os" arch="$arch" zip fail"
-      exit 1
-    fi
-    mv ${NAME}_"${os}"_"${arch}"".zip" pack/
-    rm $NAME".exe" -f
-  else
-    zip ${NAME}_"${os}"_"${arch}"".zip" $NAME
-    if [ $? -ne 0 ]; then
-      echo "os="$os" arch="$arch" zip fail"
-      exit 1
-    fi
-    mv ${NAME}_"${os}"_"${arch}"".zip" pack/
-    rm $NAME -f
-  fi
-  echo "os="$os" arch="$arch" done build"
+
+  work_dir=$(mktemp -d)
+  CGO_ENABLED=0 GOOS="${os}" GOARCH="${arch}" go build -ldflags="-s -w" -o "${work_dir}/${binary_name}" .
+
+  zip_file="${output_name}.zip"
+  (
+    cd "${work_dir}"
+    zip -q "${zip_file}" "${binary_name}"
+  )
+
+  mv "${work_dir}/${zip_file}" pack/
+  rm -rf "${work_dir}"
+
+  echo "    Packaged pack/${zip_file}"
 done
 
-zip pack.zip pack/ -r
+echo "==> Generating SHA256 checksums..."
+(
+  cd pack
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum *.zip > checksums.txt
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 *.zip > checksums.txt
+  fi
+)
 
-echo "all done"
+zip -q -r pack.zip pack/
+echo "==> All done! Artifacts created in pack/ and pack.zip"
